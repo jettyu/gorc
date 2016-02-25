@@ -55,6 +55,27 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	return recvData, err
 }
 
+func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
+	var (
+		rpcid interface{}
+		err   error
+	)
+	rpcid, err = self.handler.Send(sendData)
+	if err != nil {
+		return nil, err
+	}
+	recvChan := make(chan interface{})
+	self.Lock()
+	if _, ok := self.recvChans[rpcid]; ok {
+		err = Errof("[chanrpc] repeated rpcid, rpcid=%v", rpcid)
+	} else {
+		self.recvChans[rpcid] = recvChan
+	}
+	self.Unlock()
+	gotimer.AfterFunc(self.timeout, func(){delete(self.recvChans, rpcid)})
+	return recvChan, nil
+}
+
 func (self *Client) run() {
 	for {
 		buf, rpcid, err := self.handler.Recv()
