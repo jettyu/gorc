@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	_testTcpServer testTcpServer
-	_testTcpClient testTcpClient
+	_testTcpServer  testTcpServer
+	_testTcpClient  testTcpClient
 	_testGorcClient *Client
 )
 
@@ -209,26 +209,26 @@ func TestCallAsync(t *testing.T) {
 		t.Error(err3)
 		return
 	}
-	for i:=0; i<3; i++ {
+	for i := 0; i < 3; i++ {
 		select {
-			case data := <-recv1:
-				recvStr1 := string(data.([]byte))
-				if recvStr1 != sendStr1 {
-					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr1), len(recvStr1))
-					t.Errorf("sendStr=%s and recvStr=%s", sendStr1, recvStr1)
-				}
-			case data := <-recv2:
-				recvStr2 := string(data.([]byte))
-				if recvStr2 != sendStr2 {
-					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr2), len(recvStr2))
-					t.Errorf("sendStr=%s and recvStr=%s", sendStr2, recvStr2)
-				}
-			case data := <-recv3:
-				recvStr3 := string(data.([]byte))
-				if recvStr3 != sendStr3 {
-					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr3), len(recvStr3))
-					t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)
-				}
+		case data := <-recv1:
+			recvStr1 := string(data.([]byte))
+			if recvStr1 != sendStr1 {
+				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr1), len(recvStr1))
+				t.Errorf("sendStr=%s and recvStr=%s", sendStr1, recvStr1)
+			}
+		case data := <-recv2:
+			recvStr2 := string(data.([]byte))
+			if recvStr2 != sendStr2 {
+				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr2), len(recvStr2))
+				t.Errorf("sendStr=%s and recvStr=%s", sendStr2, recvStr2)
+			}
+		case data := <-recv3:
+			recvStr3 := string(data.([]byte))
+			if recvStr3 != sendStr3 {
+				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr3), len(recvStr3))
+				t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)
+			}
 		}
 	}
 }

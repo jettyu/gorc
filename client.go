@@ -50,6 +50,10 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	select {
 	case recvData = <-recvChan:
 	case <-gotimer.After(self.timeout):
+		self.Lock()
+		close(recvChan)
+		delete(self.recvChans, rpcid)
+		self.Unlock()
 		return nil, ErrorTimeOut
 	}
 	return recvData, err
@@ -72,7 +76,16 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 		self.recvChans[rpcid] = recvChan
 	}
 	self.Unlock()
-	gotimer.AfterFunc(self.timeout, func(){delete(self.recvChans, rpcid)})
+	f := func() {
+		self.Lock()
+		close(recvChan)
+		delete(self.recvChans, rpcid)
+		self.Unlock()
+	}
+	gotimer.AfterFunc(self.timeout, func() {
+		go f()
+	},
+	)
 	return recvChan, nil
 }
 
@@ -80,6 +93,12 @@ func (self *Client) run() {
 	for {
 		buf, rpcid, err := self.handler.Recv()
 		if err != nil {
+			self.Lock()
+			for k, v := range self.recvChans {
+				close(v)
+				delete(self.recvChans, k)
+			}
+			self.Unlock()
 			break
 		}
 		self.Lock()
