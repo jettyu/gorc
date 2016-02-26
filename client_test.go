@@ -211,23 +211,35 @@ func TestCallAsync(t *testing.T) {
 	}
 	for i := 0; i < 3; i++ {
 		select {
-		case data := <-recv1:
-			recvStr1 := string(data.([]byte))
-			if recvStr1 != sendStr1 {
-				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr1), len(recvStr1))
-				t.Errorf("sendStr=%s and recvStr=%s", sendStr1, recvStr1)
+		case data, ok := <-recv1:
+			if !ok {
+				t.Errorf("recv1 recv failed")
+			} else {
+				recvStr1 := string(data.([]byte))
+				if recvStr1 != sendStr1 {
+					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr1), len(recvStr1))
+					t.Errorf("sendStr=%s and recvStr=%s", sendStr1, recvStr1)
+				}
 			}
-		case data := <-recv2:
-			recvStr2 := string(data.([]byte))
-			if recvStr2 != sendStr2 {
-				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr2), len(recvStr2))
-				t.Errorf("sendStr=%s and recvStr=%s", sendStr2, recvStr2)
+		case data, ok := <-recv2:
+			if !ok {
+				t.Errorf("recv2 recv failed")
+			} else {
+				recvStr2 := string(data.([]byte))
+				if recvStr2 != sendStr2 {
+					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr2), len(recvStr2))
+					t.Errorf("sendStr=%s and recvStr=%s", sendStr2, recvStr2)
+				}
 			}
-		case data := <-recv3:
-			recvStr3 := string(data.([]byte))
-			if recvStr3 != sendStr3 {
-				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr3), len(recvStr3))
-				t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)
+		case data, ok := <-recv3:
+			if !ok {
+				t.Errorf("recv3 recv failed")
+			} else {
+				recvStr3 := string(data.([]byte))
+				if recvStr3 != sendStr3 {
+					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr3), len(recvStr3))
+					t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)
+				}
 			}
 		}
 	}
