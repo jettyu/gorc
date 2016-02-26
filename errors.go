@@ -4,12 +4,12 @@ import (
 	"fmt"
 )
 
-type ChanRpcError error
+type GoRcError error
 
-func Errof(format string, args ...interface{}) ChanRpcError {
+func Errof(format string, args ...interface{}) GoRcError {
 	return fmt.Errorf(format, args...)
 }
 
 var (
-	ErrorTimeOut ChanRpcError = fmt.Errorf("[chanrpc] timeout")
+	ErrorTimeOut GoRcError = fmt.Errorf("[chanrpc] timeout")
 )

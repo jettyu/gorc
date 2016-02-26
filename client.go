@@ -15,6 +15,8 @@ type Client struct {
 	recvChans map[interface{}]chan interface{}
 	handler   ClientConnInterface
 	timeout   time.Duration
+	err       error
+	errLock   sync.RWMutex
 	sync.Mutex
 }
 
@@ -26,6 +28,13 @@ func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
 	}
 	go c.run()
 	return c
+}
+
+func (self *Client) Err() error {
+	self.errLock.RLock()
+	err := self.err
+	self.errLock.Unlock()
+	return err
 }
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
@@ -93,6 +102,9 @@ func (self *Client) run() {
 	for {
 		buf, rpcid, err := self.handler.Recv()
 		if err != nil {
+			self.errLock.Lock()
+			self.err = err
+			self.errLock.Unlock()
 			self.Lock()
 			for k, v := range self.recvChans {
 				close(v)

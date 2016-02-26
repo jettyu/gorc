@@ -213,7 +213,11 @@ func TestCallAsync(t *testing.T) {
 		select {
 		case data, ok := <-recv1:
 			if !ok {
-				t.Errorf("recv1 recv failed")
+				if err := _testGorcClient.Err(); err != nil {
+					t.Errorf("recv1 recv failed err=%s", err.Error())
+					break
+				}
+				t.Errorf("recv1 recv failed timeout")
 			} else {
 				recvStr1 := string(data.([]byte))
 				if recvStr1 != sendStr1 {
@@ -223,7 +227,11 @@ func TestCallAsync(t *testing.T) {
 			}
 		case data, ok := <-recv2:
 			if !ok {
-				t.Errorf("recv2 recv failed")
+				if err := _testGorcClient.Err(); err != nil {
+					t.Errorf("recv2 recv failed err=%s", err.Error())
+					break
+				}
+				t.Errorf("recv2 recv failed timeout")
 			} else {
 				recvStr2 := string(data.([]byte))
 				if recvStr2 != sendStr2 {
@@ -233,7 +241,11 @@ func TestCallAsync(t *testing.T) {
 			}
 		case data, ok := <-recv3:
 			if !ok {
-				t.Errorf("recv3 recv failed")
+				if err := _testGorcClient.Err(); err != nil {
+					t.Errorf("recv3 recv failed err=%s", err.Error())
+					break
+				}
+				t.Errorf("recv3 recv failed timeout")
 			} else {
 				recvStr3 := string(data.([]byte))
 				if recvStr3 != sendStr3 {
