@@ -27,46 +27,75 @@ type testTcpClient struct {
 	notifyChan chan bool
 	rpcid      uint32
 	err        error
+	sync.RWMutex
+}
+
+func (self *testTcpClient) SetErr(err error) {
+	self.Lock()
+	self.err = err
+	self.Unlock()
+}
+
+func (self *testTcpClient) Err() error {
+	self.Lock()
+	err := self.err
+	self.Unlock()
+	return err
 }
 
 func (self *testTcpClient) run() {
 	var buf [1024]byte
 	go func() {
-		for {
+		flag := true
+		for flag {
 			n, err := self.conn.Read(buf[:])
 
 			if n > 0 {
 				self.recvBuf.Write(buf[:n])
 			}
-			self.notifyChan <- true
-			if err != nil {
-				self.err = err
-				break
-			}
 
+			if err != nil {
+				flag = false
+				self.SetErr(err)
+			}
+			self.notifyChan <- true
 		}
 	}()
 }
 
-func (self *testTcpClient) Send(data interface{}) (rpcid interface{}, err error) {
+func (self *testTcpClient) Encode(data interface{}) (rpcid interface{}, encodeData interface{}, err error) {
 	rpcid = fmt.Sprintf("%04d", atomic.AddUint32(&self.rpcid, 1))
 	var buffer bytes.Buffer
 	buffer.WriteString(rpcid.(string))
 	buffer.Write(data.([]byte))
 	buffer.WriteByte(0x3)
-	buf := buffer.Bytes()
-	n, e := self.conn.Write(buf)
-	if e != nil {
-		return nil, e
-	}
-	if n != len(buf) {
-		return nil, fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(buf), n)
-	}
-
-	return rpcid, nil
+	return rpcid, buffer.Bytes(), nil
 }
 
-func (self *testTcpClient) Recv() (data interface{}, rpcid interface{}, err error) {
+func (self *testTcpClient) Decode(data interface{}) (rpcid interface{}, encodeData interface{}, err error) {
+	buf := data.([]byte)
+	if len(buf) < 4 {
+		err := fmt.Errorf("conn Recv wrong size, min size=%d, buf size=%d", 4, len(buf))
+		return nil, nil, err
+	}
+	rpcid = string(buf[:4])
+	return rpcid, buf[4 : len(buf)-1], nil
+}
+
+func (self *testTcpClient) Send(data interface{}) (err error) {
+	buf := data.([]byte)
+	n, e := self.conn.Write(buf)
+	if e != nil {
+		return e
+	}
+	if n != len(buf) {
+		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(buf), n)
+	}
+
+	return nil
+}
+
+func (self *testTcpClient) Recv() (data interface{}, err error) {
 	var (
 		buf []byte
 		e   error
@@ -74,25 +103,20 @@ func (self *testTcpClient) Recv() (data interface{}, rpcid interface{}, err erro
 	for {
 		<-self.notifyChan
 		buf, e = self.recvBuf.ReadBytes(0x3)
-		if e != nil {
-			continue
-		}
-
-		if self.recvBuf.Len() > 0 {
-			self.notifyChan <- true
+		err = self.Err()
+		if err == nil {
+			if e != nil {
+				continue
+			}
+			if self.recvBuf.Len() > 0 {
+				self.notifyChan <- true
+			}
 		}
 
 		break
 	}
 
-	if len(buf) < 4 {
-		if err == nil {
-			err = fmt.Errorf("conn Recv wrong size, min size=%d, buf size=%d", 4, len(buf))
-			return nil, nil, err
-		}
-	}
-	rpcid = string(buf[:4])
-	return buf[4 : len(buf)-1], rpcid, err
+	return buf, err
 }
 
 func testTcpServerStart(addr string) error {

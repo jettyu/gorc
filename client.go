@@ -7,8 +7,10 @@ import (
 )
 
 type ClientConnInterface interface {
-	Send(interface{}) (rpcid interface{}, err error)
-	Recv() (buf interface{}, rpcid interface{}, err error)
+	Encode(interface{}) (rpcid interface{}, encodeData interface{}, err error)
+	Decode(interface{}) (rpcid interface{}, decodeData interface{}, err error)
+	Send(interface{}) (err error)
+	Recv() (buf interface{}, err error)
 }
 
 type Client struct {
@@ -39,12 +41,14 @@ func (self *Client) Err() error {
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
 	var (
-		rpcid interface{}
+		rpcid      interface{}
+		encodeData interface{}
 	)
-	rpcid, err = self.handler.Send(sendData)
+	rpcid, encodeData, err = self.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
+
 	recvChan := make(chan interface{})
 	self.Lock()
 	if _, ok := self.recvChans[rpcid]; ok {
@@ -53,6 +57,10 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 		self.recvChans[rpcid] = recvChan
 	}
 	self.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	err = self.handler.Send(encodeData)
 	if err != nil {
 		return nil, err
 	}
@@ -70,13 +78,15 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 	var (
-		rpcid interface{}
-		err   error
+		rpcid      interface{}
+		encodeData interface{}
+		err        error
 	)
-	rpcid, err = self.handler.Send(sendData)
+	rpcid, encodeData, err = self.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
+
 	recvChan := make(chan interface{})
 	self.Lock()
 	if _, ok := self.recvChans[rpcid]; ok {
@@ -85,6 +95,13 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 		self.recvChans[rpcid] = recvChan
 	}
 	self.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	err = self.handler.Send(encodeData)
+	if err != nil {
+		return nil, err
+	}
 	f := func() {
 		self.Lock()
 		close(recvChan)
@@ -100,7 +117,7 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 
 func (self *Client) run() {
 	for {
-		buf, rpcid, err := self.handler.Recv()
+		buf, err := self.handler.Recv()
 		if err != nil {
 			self.errLock.Lock()
 			self.err = err
@@ -113,10 +130,14 @@ func (self *Client) run() {
 			self.Unlock()
 			break
 		}
+		rpcid, decodeData, e := self.handler.Decode(buf)
+		if e != nil {
+			continue
+		}
 		self.Lock()
 		recvChan, ok := self.recvChans[rpcid]
 		if ok {
-			recvChan <- buf
+			recvChan <- decodeData
 			delete(self.recvChans, rpcid)
 		}
 		self.Unlock()
