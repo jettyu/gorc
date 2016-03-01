@@ -41,7 +41,7 @@ func (self *Client) Err() error {
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
 	var (
-		id      interface{}
+		id         interface{}
 		encodeData interface{}
 	)
 	id, encodeData, err = self.handler.Encode(sendData)
@@ -78,7 +78,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 	var (
-		id      interface{}
+		id         interface{}
 		encodeData interface{}
 		err        error
 	)
@@ -130,16 +130,18 @@ func (self *Client) run() {
 			self.Unlock()
 			break
 		}
-		id, decodeData, e := self.handler.Decode(buf)
-		if e != nil {
-			continue
-		}
-		self.Lock()
-		recvChan, ok := self.recvChans[id]
-		if ok {
-			recvChan <- decodeData
-			delete(self.recvChans, id)
-		}
-		self.Unlock()
+		go func(buf interface{}, self *Client) {
+			id, decodeData, e := self.handler.Decode(buf)
+			if e != nil {
+				return
+			}
+			self.Lock()
+			recvChan, ok := self.recvChans[id]
+			if ok {
+				recvChan <- decodeData
+				delete(self.recvChans, id)
+			}
+			self.Unlock()
+		}(buf, self)
 	}
 }

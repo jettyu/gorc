@@ -25,7 +25,7 @@ type testTcpClient struct {
 	conn       net.Conn
 	recvBuf    bytes.Buffer
 	notifyChan chan bool
-	id      uint32
+	id         uint32
 	err        error
 	sync.RWMutex
 }
