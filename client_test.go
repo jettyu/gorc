@@ -25,7 +25,7 @@ type testTcpClient struct {
 	conn       net.Conn
 	recvBuf    bytes.Buffer
 	notifyChan chan bool
-	rpcid      uint32
+	id      uint32
 	err        error
 	sync.RWMutex
 }
@@ -63,23 +63,23 @@ func (self *testTcpClient) run() {
 	}()
 }
 
-func (self *testTcpClient) Encode(data interface{}) (rpcid interface{}, encodeData interface{}, err error) {
-	rpcid = fmt.Sprintf("%04d", atomic.AddUint32(&self.rpcid, 1))
+func (self *testTcpClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
+	id = fmt.Sprintf("%04d", atomic.AddUint32(&self.id, 1))
 	var buffer bytes.Buffer
-	buffer.WriteString(rpcid.(string))
+	buffer.WriteString(id.(string))
 	buffer.Write(data.([]byte))
 	buffer.WriteByte(0x3)
-	return rpcid, buffer.Bytes(), nil
+	return id, buffer.Bytes(), nil
 }
 
-func (self *testTcpClient) Decode(data interface{}) (rpcid interface{}, encodeData interface{}, err error) {
+func (self *testTcpClient) Decode(data interface{}) (id interface{}, encodeData interface{}, err error) {
 	buf := data.([]byte)
 	if len(buf) < 4 {
 		err := fmt.Errorf("conn Recv wrong size, min size=%d, buf size=%d", 4, len(buf))
 		return nil, nil, err
 	}
-	rpcid = string(buf[:4])
-	return rpcid, buf[4 : len(buf)-1], nil
+	id = string(buf[:4])
+	return id, buf[4 : len(buf)-1], nil
 }
 
 func (self *testTcpClient) Send(data interface{}) (err error) {

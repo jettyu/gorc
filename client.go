@@ -7,8 +7,8 @@ import (
 )
 
 type ClientConnInterface interface {
-	Encode(interface{}) (rpcid interface{}, encodeData interface{}, err error)
-	Decode(interface{}) (rpcid interface{}, decodeData interface{}, err error)
+	Encode(interface{}) (id interface{}, encodeData interface{}, err error)
+	Decode(interface{}) (id interface{}, decodeData interface{}, err error)
 	Send(interface{}) (err error)
 	Recv() (buf interface{}, err error)
 }
@@ -41,20 +41,20 @@ func (self *Client) Err() error {
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
 	var (
-		rpcid      interface{}
+		id      interface{}
 		encodeData interface{}
 	)
-	rpcid, encodeData, err = self.handler.Encode(sendData)
+	id, encodeData, err = self.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
 
 	recvChan := make(chan interface{})
 	self.Lock()
-	if _, ok := self.recvChans[rpcid]; ok {
-		err = Errof("[chanrpc] repeated rpcid, rpcid=%v", rpcid)
+	if _, ok := self.recvChans[id]; ok {
+		err = Errof("[chanrpc] repeated id, id=%v", id)
 	} else {
-		self.recvChans[rpcid] = recvChan
+		self.recvChans[id] = recvChan
 	}
 	self.Unlock()
 	if err != nil {
@@ -69,7 +69,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	case <-gotimer.After(self.timeout):
 		self.Lock()
 		close(recvChan)
-		delete(self.recvChans, rpcid)
+		delete(self.recvChans, id)
 		self.Unlock()
 		return nil, ErrorTimeOut
 	}
@@ -78,21 +78,21 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 	var (
-		rpcid      interface{}
+		id      interface{}
 		encodeData interface{}
 		err        error
 	)
-	rpcid, encodeData, err = self.handler.Encode(sendData)
+	id, encodeData, err = self.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
 
 	recvChan := make(chan interface{})
 	self.Lock()
-	if _, ok := self.recvChans[rpcid]; ok {
-		err = Errof("[chanrpc] repeated rpcid, rpcid=%v", rpcid)
+	if _, ok := self.recvChans[id]; ok {
+		err = Errof("[chanrpc] repeated id, id=%v", id)
 	} else {
-		self.recvChans[rpcid] = recvChan
+		self.recvChans[id] = recvChan
 	}
 	self.Unlock()
 	if err != nil {
@@ -105,7 +105,7 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 	f := func() {
 		self.Lock()
 		close(recvChan)
-		delete(self.recvChans, rpcid)
+		delete(self.recvChans, id)
 		self.Unlock()
 	}
 	gotimer.AfterFunc(self.timeout, func() {
@@ -130,15 +130,15 @@ func (self *Client) run() {
 			self.Unlock()
 			break
 		}
-		rpcid, decodeData, e := self.handler.Decode(buf)
+		id, decodeData, e := self.handler.Decode(buf)
 		if e != nil {
 			continue
 		}
 		self.Lock()
-		recvChan, ok := self.recvChans[rpcid]
+		recvChan, ok := self.recvChans[id]
 		if ok {
 			recvChan <- decodeData
-			delete(self.recvChans, rpcid)
+			delete(self.recvChans, id)
 		}
 		self.Unlock()
 	}
