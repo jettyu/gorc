@@ -36,7 +36,7 @@ func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
 func (self *Client) Err() error {
 	self.errLock.RLock()
 	err := self.err
-	self.errLock.Unlock()
+	self.errLock.RUnlock()
 	return err
 }
 
