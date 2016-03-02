@@ -43,6 +43,10 @@ func (self *testTcpClient) Err() error {
 	return err
 }
 
+func (self *testTcpClient) Close() error {
+	return self.conn.Close()
+}
+
 func (self *testTcpClient) run() {
 	var buf [1024]byte
 	go func() {

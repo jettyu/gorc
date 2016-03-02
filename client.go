@@ -11,6 +11,7 @@ type ClientConnInterface interface {
 	Decode(interface{}) (id interface{}, decodeData interface{}, err error)
 	Send(interface{}) (err error)
 	Recv() (buf interface{}, err error)
+	Close() error
 }
 
 type Client struct {
@@ -37,6 +38,12 @@ func (self *Client) Err() error {
 	err := self.err
 	self.errLock.Unlock()
 	return err
+}
+
+func (self *Client) SetErr(err error) {
+	self.errLock.Lock()
+	self.err = err
+	self.errLock.Unlock()
 }
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
@@ -113,6 +120,10 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 	},
 	)
 	return recvChan, nil
+}
+
+func (self *Client) Close() error {
+	return self.handler.Close()
 }
 
 func (self *Client) run() {
