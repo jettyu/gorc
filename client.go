@@ -77,18 +77,30 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	if err != nil {
 		return nil, err
 	}
+	
+	f := func() {
+		self.Lock()
+		delete(self.recvChans, id)
+		close(recvChan)
+		self.Unlock()
+	}
+	gotimer.AfterFunc(self.timeout, func() {
+		go f()
+	},
+	)
 	err = self.handler.Send(encodeData)
 	if err != nil {
 		return nil, err
 	}
+	ok := true
 	select {
-	case recvData = <-recvChan:
-	case <-gotimer.After(self.timeout):
-		self.Lock()
-		close(recvChan)
-		delete(self.recvChans, id)
-		self.Unlock()
-		return nil, ErrorTimeOut
+	case recvData,ok = <-recvChan:
+		if !ok {
+			err = self.Err()
+			if err == nil {
+				err = ErrorTimeOut
+			}
+		}
 	}
 	return recvData, err
 }
@@ -118,20 +130,22 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 	if err != nil {
 		return nil, err
 	}
-	err = self.handler.Send(encodeData)
-	if err != nil {
-		return nil, err
-	}
+	
 	f := func() {
 		self.Lock()
-		close(recvChan)
 		delete(self.recvChans, id)
+		close(recvChan)
 		self.Unlock()
 	}
 	gotimer.AfterFunc(self.timeout, func() {
 		go f()
 	},
 	)
+	
+	err = self.handler.Send(encodeData)
+	if err != nil {
+		return nil, err
+	}
 	return recvChan, nil
 }
 
@@ -167,8 +181,8 @@ func (self *Client) run() {
 			self.errLock.Unlock()
 			self.Lock()
 			for k, v := range self.recvChans {
-				close(v)
 				delete(self.recvChans, k)
+				close(v)
 			}
 			self.Unlock()
 			break
