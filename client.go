@@ -1,9 +1,11 @@
 package gorc
 
 import (
-	"github.com/jettyu/gotimer"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/jettyu/gotimer"
 )
 
 type ClientConnInterface interface {
@@ -21,6 +23,7 @@ type Client struct {
 	err       error
 	errLock   sync.RWMutex
 	sync.Mutex
+	status int32
 }
 
 func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
@@ -46,7 +49,14 @@ func (self *Client) SetErr(err error) {
 	self.errLock.Unlock()
 }
 
+func (self *Client) IsClosed() bool {
+	return atomic.LoadInt32(&self.status) == 1
+}
+
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
+	if self.IsClosed() {
+		return nil, ErrorClosed
+	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -84,6 +94,9 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 }
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
+	if self.IsClosed() {
+		return nil, ErrorClosed
+	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -123,7 +136,26 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 }
 
 func (self *Client) Close() error {
-	return self.handler.Close()
+	if self.IsClosed() {
+		return nil
+	}
+
+	atomic.StoreInt32(&self.status, 1)
+	go func() {
+		flag := true
+		for flag {
+			self.Lock()
+			if len(self.recvChans) == 0 {
+				flag = false
+				self.handler.Close()
+			}
+			self.Unlock()
+			if flag {
+				time.Sleep(time.Second)
+			}
+		}
+	}()
+	return nil
 }
 
 func (self *Client) run() {

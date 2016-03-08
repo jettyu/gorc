@@ -11,5 +11,6 @@ func Errof(format string, args ...interface{}) GoRcError {
 }
 
 var (
-	ErrorTimeOut GoRcError = fmt.Errorf("[chanrpc] timeout")
+	ErrorTimeOut GoRcError = fmt.Errorf("[gorc] timeout")
+	ErrorClosed  GoRcError = fmt.Errorf("[gorc] closed")
 )
