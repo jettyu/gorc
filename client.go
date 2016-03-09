@@ -54,9 +54,9 @@ func (self *Client) IsClosed() bool {
 }
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
-	if self.IsClosed() {
-		return nil, ErrorClosed
-	}
+//	if self.IsClosed() {
+//		return nil, ErrorClosed
+//	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -106,9 +106,9 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 }
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
-	if self.IsClosed() {
-		return nil, ErrorClosed
-	}
+//	if self.IsClosed() {
+//		return nil, ErrorClosed
+//	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -156,6 +156,7 @@ func (self *Client) Close() error {
 
 	atomic.StoreInt32(&self.status, 1)
 	go func() {
+		<-gotimer.After(time.Second)
 		flag := true
 		for flag {
 			self.Lock()
