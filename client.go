@@ -49,6 +49,10 @@ func (self *Client) SetErr(err error) {
 	self.errLock.Unlock()
 }
 
+func (self *Client) GetHandler() ClientConnInterface {
+	return self.handler
+}
+
 func (self *Client) IsClosed() bool {
 	return atomic.LoadInt32(&self.status) == 1
 }
@@ -77,8 +81,12 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	if err != nil {
 		return nil, err
 	}
-	
+	closeChan := make(chan struct{})
 	f := func() {
+		select {
+			case <- closeChan:
+				return
+		}
 		self.Lock()
 		delete(self.recvChans, id)
 		close(recvChan)
@@ -102,6 +110,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 			}
 		}
 	}
+	close(closeChan)
 	return recvData, err
 }
 
