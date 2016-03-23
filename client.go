@@ -58,9 +58,9 @@ func (self *Client) IsClosed() bool {
 }
 
 func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
-//	if self.IsClosed() {
-//		return nil, ErrorClosed
-//	}
+	//	if self.IsClosed() {
+	//		return nil, ErrorClosed
+	//	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -84,8 +84,8 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	closeChan := make(chan struct{})
 	f := func() {
 		select {
-			case <- closeChan:
-				return
+		case <-closeChan:
+			return
 		}
 		self.Lock()
 		delete(self.recvChans, id)
@@ -102,7 +102,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	}
 	ok := true
 	select {
-	case recvData,ok = <-recvChan:
+	case recvData, ok = <-recvChan:
 		if !ok {
 			err = self.Err()
 			if err == nil {
@@ -115,9 +115,9 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 }
 
 func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
-//	if self.IsClosed() {
-//		return nil, ErrorClosed
-//	}
+	//	if self.IsClosed() {
+	//		return nil, ErrorClosed
+	//	}
 	var (
 		id         interface{}
 		encodeData interface{}
@@ -139,18 +139,21 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	f := func() {
 		self.Lock()
-		delete(self.recvChans, id)
-		close(recvChan)
+		_, ok := self.recvChans[id]
+		if ok {
+			delete(self.recvChans, id)
+			close(recvChan)
+		}
 		self.Unlock()
 	}
 	gotimer.AfterFunc(self.timeout, func() {
 		go f()
 	},
 	)
-	
+
 	err = self.handler.Send(encodeData)
 	if err != nil {
 		return nil, err
