@@ -1,6 +1,7 @@
 package gorc
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"log"
@@ -22,49 +23,31 @@ type testTcpServer struct {
 }
 
 type testTcpClient struct {
-	conn       net.Conn
-	recvBuf    bytes.Buffer
-	notifyChan chan bool
-	id         uint32
-	err        error
-	sync.RWMutex
+	conn  net.Conn
+	bw    *bufio.Writer
+	br    *bufio.Reader
+	id    uint32
+	err   error
+	rLock sync.Mutex
+	wLock sync.Mutex
+	eLock sync.RWMutex
 }
 
 func (self *testTcpClient) SetErr(err error) {
-	self.Lock()
+	self.eLock.Lock()
 	self.err = err
-	self.Unlock()
+	self.eLock.Unlock()
 }
 
 func (self *testTcpClient) Err() error {
-	self.Lock()
+	self.eLock.Lock()
 	err := self.err
-	self.Unlock()
+	self.eLock.Unlock()
 	return err
 }
 
 func (self *testTcpClient) Close() error {
 	return self.conn.Close()
-}
-
-func (self *testTcpClient) run() {
-	var buf [1024]byte
-	go func() {
-		flag := true
-		for flag {
-			n, err := self.conn.Read(buf[:])
-
-			if n > 0 {
-				self.recvBuf.Write(buf[:n])
-			}
-
-			if err != nil {
-				flag = false
-				self.SetErr(err)
-			}
-			self.notifyChan <- true
-		}
-	}()
 }
 
 func (self *testTcpClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
@@ -88,39 +71,23 @@ func (self *testTcpClient) Decode(data interface{}) (id interface{}, encodeData 
 
 func (self *testTcpClient) Send(data interface{}) (err error) {
 	buf := data.([]byte)
-	n, e := self.conn.Write(buf)
+	self.wLock.Lock()
+	defer self.wLock.Unlock()
+	n, e := self.bw.Write(buf)
 	if e != nil {
 		return e
 	}
 	if n != len(buf) {
 		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(buf), n)
 	}
-
-	return nil
+	return self.bw.Flush()
 }
 
 func (self *testTcpClient) Recv() (data interface{}, err error) {
-	var (
-		buf []byte
-		e   error
-	)
-	for {
-		<-self.notifyChan
-		buf, e = self.recvBuf.ReadBytes(0x3)
-		err = self.Err()
-		if err == nil {
-			if e != nil {
-				continue
-			}
-			if self.recvBuf.Len() > 0 {
-				self.notifyChan <- true
-			}
-		}
-
-		break
-	}
-
-	return buf, err
+	self.rLock.Lock()
+	defer self.rLock.Unlock()
+	buf, e := self.br.ReadBytes(0x3)
+	return buf, e
 }
 
 func testTcpServerStart(addr string) error {
@@ -172,8 +139,8 @@ func testTcpClientConn(addr string) error {
 		return err
 	}
 	_testTcpClient.conn = conn
-	_testTcpClient.notifyChan = make(chan bool, 1024)
-	_testTcpClient.run()
+	_testTcpClient.bw = bufio.NewWriter(conn)
+	_testTcpClient.br = bufio.NewReader(conn)
 	return nil
 }
 
