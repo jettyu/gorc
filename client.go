@@ -86,6 +86,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 		select {
 		case <-closeChan:
 			return
+		default:
 		}
 		self.Lock()
 		delete(self.recvChans, id)
