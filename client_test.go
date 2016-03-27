@@ -248,7 +248,10 @@ func TestCallAsync(t *testing.T) {
 					t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)
 				}
 			}
+		case <-time.After(time.Second):
+			t.Error("timeout")
 		}
+
 	}
 }
 

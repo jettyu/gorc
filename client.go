@@ -209,8 +209,8 @@ func (self *Client) run() {
 			self.Lock()
 			recvChan, ok := self.recvChans[id]
 			if ok {
-				recvChan <- decodeData
 				delete(self.recvChans, id)
+				recvChan <- decodeData
 			}
 			self.Unlock()
 		}(buf, self)
