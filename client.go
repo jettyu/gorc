@@ -201,18 +201,21 @@ func (self *Client) run() {
 			self.Unlock()
 			break
 		}
-		go func(buf interface{}, self *Client) {
-			id, decodeData, e := self.handler.Decode(buf)
-			if e != nil {
-				return
+		//	go func(buf interface{}, self *Client) {
+		id, decodeData, e := self.handler.Decode(buf)
+		if e != nil {
+			return
+		}
+		self.Lock()
+		recvChan, ok := self.recvChans[id]
+		if ok {
+			select {
+			case recvChan <- decodeData:
+			default:
 			}
-			self.Lock()
-			recvChan, ok := self.recvChans[id]
-			if ok {
-				recvChan <- decodeData
-				delete(self.recvChans, id)
-			}
-			self.Unlock()
-		}(buf, self)
+			delete(self.recvChans, id)
+		}
+		self.Unlock()
+		//	}(buf, self)
 	}
 }
