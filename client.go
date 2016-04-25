@@ -89,8 +89,11 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 		default:
 		}
 		self.Lock()
-		close(recvChan)
-		delete(self.recvChans, id)
+		_, ok := self.recvChans[id]
+		if ok {
+			close(recvChan)
+			delete(self.recvChans, id)
+		}
 		self.Unlock()
 	}
 	gotimer.AfterFunc(self.timeout, func() {

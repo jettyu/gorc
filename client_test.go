@@ -16,6 +16,7 @@ var (
 	_testTcpServer  testTcpServer
 	_testTcpClient  testTcpClient
 	_testGorcClient *Client
+	wg              sync.WaitGroup
 )
 
 type testTcpServer struct {
@@ -23,14 +24,16 @@ type testTcpServer struct {
 }
 
 type testTcpClient struct {
-	conn  net.Conn
-	bw    *bufio.Writer
-	br    *bufio.Reader
-	id    uint32
-	err   error
-	rLock sync.Mutex
-	wLock sync.Mutex
-	eLock sync.RWMutex
+	conn   net.Conn
+	bw     *bufio.Writer
+	br     *bufio.Reader
+	id     uint32
+	err    error
+	closed bool
+	rLock  sync.Mutex
+	wLock  sync.Mutex
+	eLock  sync.RWMutex
+	cLock  sync.RWMutex
 }
 
 func (self *testTcpClient) SetErr(err error) {
@@ -47,7 +50,20 @@ func (self *testTcpClient) Err() error {
 }
 
 func (self *testTcpClient) Close() error {
+	self.cLock.Lock()
+	defer self.cLock.Unlock()
+	if self.closed {
+		return nil
+	}
+	self.closed = true
 	return self.conn.Close()
+}
+
+func (self *testTcpClient) Closed() bool {
+	self.cLock.RLock()
+	closed := self.closed
+	self.cLock.RUnlock()
+	return closed
 }
 
 func (self *testTcpClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
@@ -157,11 +173,14 @@ func TestStart(t *testing.T) {
 	if err := testTcpClientConn("127.0.0.1:10010"); err != nil {
 		t.Fatal(err)
 	}
+	wg.Add(1)
+	defer wg.Done()
 	_testGorcClient = NewClient(&_testTcpClient, time.Second*2)
 }
 
 func TestClient(t *testing.T) {
-
+	wg.Add(1)
+	defer wg.Done()
 	var wg sync.WaitGroup
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
@@ -184,6 +203,8 @@ func TestClient(t *testing.T) {
 }
 
 func TestCallAsync(t *testing.T) {
+	wg.Add(1)
+	defer wg.Done()
 	var (
 		sendStr1 = "hello0"
 		sendStr2 = "hello1"
@@ -256,6 +277,7 @@ func TestCallAsync(t *testing.T) {
 }
 
 func TestStop(t *testing.T) {
+	wg.Wait()
 	testTcpClientClose()
 	testTcpServerStop()
 }
