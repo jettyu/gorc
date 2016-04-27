@@ -201,6 +201,7 @@ func (self *Client) run() {
 				delete(self.recvChans, k)
 				close(v)
 			}
+			self.recvChans = nil
 			self.Unlock()
 			break
 		}
