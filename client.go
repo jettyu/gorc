@@ -146,8 +146,8 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 
 	f := func() {
 		self.Lock()
-		_, ok := self.recvChans[id]
-		if ok {
+		r, ok := self.recvChans[id]
+		if ok && r == recvChan {
 			close(recvChan)
 			delete(self.recvChans, id)
 		}
