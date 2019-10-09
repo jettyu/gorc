@@ -4,13 +4,17 @@ import (
 	"fmt"
 )
 
-type GoRcError error
+// Error ...
+type Error error
 
-func Errof(format string, args ...interface{}) GoRcError {
+// Errof ...
+func Errof(format string, args ...interface{}) Error {
 	return fmt.Errorf(format, args...)
 }
 
 var (
-	ErrorTimeOut GoRcError = fmt.Errorf("[gorc] timeout")
-	ErrorClosed  GoRcError = fmt.Errorf("[gorc] closed")
+	// ErrorTimeOut ...
+	ErrorTimeOut Error = fmt.Errorf("[gorc] timeout")
+	// ErrorClosed ...
+	ErrorClosed Error = fmt.Errorf("[gorc] closed")
 )

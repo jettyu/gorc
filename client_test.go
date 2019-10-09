@@ -13,17 +13,17 @@ import (
 )
 
 var (
-	_testTcpServer  testTcpServer
-	_testTcpClient  testTcpClient
+	_testTCPServer  testTCPServer
+	_testTCPClient  testTCPClient
 	_testGorcClient *Client
 	wg              sync.WaitGroup
 )
 
-type testTcpServer struct {
+type testTCPServer struct {
 	l net.Listener
 }
 
-type testTcpClient struct {
+type testTCPClient struct {
 	conn   net.Conn
 	bw     *bufio.Writer
 	br     *bufio.Reader
@@ -36,38 +36,38 @@ type testTcpClient struct {
 	cLock  sync.RWMutex
 }
 
-func (self *testTcpClient) SetErr(err error) {
-	self.eLock.Lock()
-	self.err = err
-	self.eLock.Unlock()
+func (p *testTCPClient) SetErr(err error) {
+	p.eLock.Lock()
+	p.err = err
+	p.eLock.Unlock()
 }
 
-func (self *testTcpClient) Err() error {
-	self.eLock.Lock()
-	err := self.err
-	self.eLock.Unlock()
+func (p *testTCPClient) Err() error {
+	p.eLock.Lock()
+	err := p.err
+	p.eLock.Unlock()
 	return err
 }
 
-func (self *testTcpClient) Close() error {
-	self.cLock.Lock()
-	defer self.cLock.Unlock()
-	if self.closed {
+func (p *testTCPClient) Close() error {
+	p.cLock.Lock()
+	defer p.cLock.Unlock()
+	if p.closed {
 		return nil
 	}
-	self.closed = true
-	return self.conn.Close()
+	p.closed = true
+	return p.conn.Close()
 }
 
-func (self *testTcpClient) Closed() bool {
-	self.cLock.RLock()
-	closed := self.closed
-	self.cLock.RUnlock()
+func (p *testTCPClient) Closed() bool {
+	p.cLock.RLock()
+	closed := p.closed
+	p.cLock.RUnlock()
 	return closed
 }
 
-func (self *testTcpClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
-	id = fmt.Sprintf("%04d", atomic.AddUint32(&self.id, 1))
+func (p *testTCPClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
+	id = fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
 	var buffer bytes.Buffer
 	buffer.WriteString(id.(string))
 	buffer.Write(data.([]byte))
@@ -75,7 +75,7 @@ func (self *testTcpClient) Encode(data interface{}) (id interface{}, encodeData 
 	return id, buffer.Bytes(), nil
 }
 
-func (self *testTcpClient) Decode(data interface{}) (id interface{}, encodeData interface{}, err error) {
+func (p *testTCPClient) Decode(data interface{}) (id interface{}, encodeData interface{}, err error) {
 	buf := data.([]byte)
 	if len(buf) < 4 {
 		err := fmt.Errorf("conn Recv wrong size, min size=%d, buf size=%d", 4, len(buf))
@@ -85,38 +85,46 @@ func (self *testTcpClient) Decode(data interface{}) (id interface{}, encodeData 
 	return id, buf[4 : len(buf)-1], nil
 }
 
-func (self *testTcpClient) Send(data interface{}) (err error) {
+func (p *testTCPClient) Send(data interface{}) (err error) {
 	buf := data.([]byte)
-	self.wLock.Lock()
-	defer self.wLock.Unlock()
-	n, e := self.bw.Write(buf)
+	p.wLock.Lock()
+	defer p.wLock.Unlock()
+	n, e := p.bw.Write(buf)
 	if e != nil {
 		return e
 	}
 	if n != len(buf) {
 		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(buf), n)
 	}
-	return self.bw.Flush()
+	return p.bw.Flush()
 }
 
-func (self *testTcpClient) Recv() (data interface{}, err error) {
-	self.rLock.Lock()
-	defer self.rLock.Unlock()
-	buf, e := self.br.ReadBytes(0x3)
+func (p *testTCPClient) Recv() (data interface{}, err error) {
+	p.rLock.Lock()
+	defer p.rLock.Unlock()
+	buf, e := p.br.ReadBytes(0x3)
 	return buf, e
 }
 
-func testTcpServerStart(addr string) error {
+var (
+	tcpServerStarted bool
+)
+
+func testTCPServerStart(addr string) error {
+	if tcpServerStarted {
+		return nil
+	}
+	tcpServerStarted = true
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	_testTcpServer.l = l
+	_testTCPServer.l = l
 
 	go func() {
 		for {
-			conn, err := _testTcpServer.l.Accept()
+			conn, err := _testTCPServer.l.Accept()
 			if err != nil {
 				log.Println(err)
 				break
@@ -140,45 +148,58 @@ func testTcpServerStart(addr string) error {
 	return nil
 }
 
-func testTcpServerStop() {
-	if _testTcpServer.l != nil {
-		if err := _testTcpServer.l.Close(); err != nil {
+func testTCPServerStop() {
+	if !tcpServerStarted {
+		return
+	}
+	tcpServerStarted = false
+	if _testTCPServer.l != nil {
+		if err := _testTCPServer.l.Close(); err != nil {
 			panic(err)
 		}
-		_testTcpServer.l = nil
+		_testTCPServer.l = nil
 	}
 }
 
-func testTcpClientConn(addr string) error {
+func testTCPClientConn(addr string) error {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
-	_testTcpClient.conn = conn
-	_testTcpClient.bw = bufio.NewWriter(conn)
-	_testTcpClient.br = bufio.NewReader(conn)
+	_testTCPClient.conn = conn
+	_testTCPClient.bw = bufio.NewWriter(conn)
+	_testTCPClient.br = bufio.NewReader(conn)
 	return nil
 }
 
-func testTcpClientClose() {
-	if _testTcpClient.conn != nil {
-		_testTcpClient.conn.Close()
+func testTCPClientClose() {
+	if _testTCPClient.conn != nil {
+		_testTCPClient.conn.Close()
 	}
 }
 
-func TestStart(t *testing.T) {
-	if err := testTcpServerStart(":10010"); err != nil {
+func testStart(t *testing.T) {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	if err := testTCPServerStart(":10010"); err != nil {
 		t.Fatal(err)
 	}
-	if err := testTcpClientConn("127.0.0.1:10010"); err != nil {
+	if err := testTCPClientConn("127.0.0.1:10010"); err != nil {
 		t.Fatal(err)
 	}
 	wg.Add(1)
 	defer wg.Done()
-	_testGorcClient = NewClient(&_testTcpClient, time.Second*2)
+	_testGorcClient = NewClient(&_testTCPClient, time.Second*2)
+}
+
+func testStop(t *testing.T) {
+	wg.Wait()
+	testTCPClientClose()
+	testTCPServerStop()
 }
 
 func TestClient(t *testing.T) {
+	testStart(t)
+	defer testStop(t)
 	wg.Add(1)
 	defer wg.Done()
 	var wg sync.WaitGroup
@@ -203,6 +224,8 @@ func TestClient(t *testing.T) {
 }
 
 func TestCallAsync(t *testing.T) {
+	testStart(t)
+	defer testStop(t)
 	wg.Add(1)
 	defer wg.Done()
 	var (
@@ -274,12 +297,6 @@ func TestCallAsync(t *testing.T) {
 		}
 
 	}
-}
-
-func TestStop(t *testing.T) {
-	wg.Wait()
-	testTcpClientClose()
-	testTcpServerStop()
 }
 
 //func TestCall(t *testing.T) {

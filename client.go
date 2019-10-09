@@ -8,6 +8,7 @@ import (
 	"github.com/jettyu/gotimer"
 )
 
+// ClientConnInterface ...
 type ClientConnInterface interface {
 	Encode(interface{}) (id interface{}, encodeData interface{}, err error)
 	Decode(interface{}) (id interface{}, decodeData interface{}, err error)
@@ -16,6 +17,7 @@ type ClientConnInterface interface {
 	Close() error
 }
 
+// Client ...
 type Client struct {
 	recvChans map[interface{}]chan interface{}
 	handler   ClientConnInterface
@@ -26,6 +28,7 @@ type Client struct {
 	status int32
 }
 
+// NewClient ...
 func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
 	c := &Client{
 		recvChans: make(map[interface{}]chan interface{}),
@@ -36,28 +39,33 @@ func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
 	return c
 }
 
-func (self *Client) Err() error {
-	self.errLock.RLock()
-	err := self.err
-	self.errLock.RUnlock()
+// Err ...
+func (p *Client) Err() error {
+	p.errLock.RLock()
+	err := p.err
+	p.errLock.RUnlock()
 	return err
 }
 
-func (self *Client) SetErr(err error) {
-	self.errLock.Lock()
-	self.err = err
-	self.errLock.Unlock()
+// SetErr ...
+func (p *Client) SetErr(err error) {
+	p.errLock.Lock()
+	p.err = err
+	p.errLock.Unlock()
 }
 
-func (self *Client) GetHandler() ClientConnInterface {
-	return self.handler
+// GetHandler ...
+func (p *Client) GetHandler() ClientConnInterface {
+	return p.handler
 }
 
-func (self *Client) IsClosed() bool {
-	return atomic.LoadInt32(&self.status) == 1
+// IsClosed ...
+func (p *Client) IsClosed() bool {
+	return atomic.LoadInt32(&p.status) == 1
 }
 
-func (self *Client) Call(sendData interface{}) (recvData interface{}, err error) {
+// Call ...
+func (p *Client) Call(sendData interface{}) (recvData interface{}, err error) {
 	//	if self.IsClosed() {
 	//		return nil, ErrorClosed
 	//	}
@@ -65,19 +73,19 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 		id         interface{}
 		encodeData interface{}
 	)
-	id, encodeData, err = self.handler.Encode(sendData)
+	id, encodeData, err = p.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
 
 	recvChan := make(chan interface{}, 1)
-	self.Lock()
-	if _, ok := self.recvChans[id]; ok {
+	p.Lock()
+	if _, ok := p.recvChans[id]; ok {
 		err = Errof("[chanrpc] repeated id, id=%v", id)
 	} else {
-		self.recvChans[id] = recvChan
+		p.recvChans[id] = recvChan
 	}
-	self.Unlock()
+	p.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -88,19 +96,19 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 			return
 		default:
 		}
-		self.Lock()
-		_, ok := self.recvChans[id]
+		p.Lock()
+		_, ok := p.recvChans[id]
 		if ok {
 			close(recvChan)
-			delete(self.recvChans, id)
+			delete(p.recvChans, id)
 		}
-		self.Unlock()
+		p.Unlock()
 	}
-	gotimer.AfterFunc(self.timeout, func() {
+	gotimer.AfterFunc(p.timeout, func() {
 		go f()
 	},
 	)
-	err = self.handler.Send(encodeData)
+	err = p.handler.Send(encodeData)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +116,7 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	select {
 	case recvData, ok = <-recvChan:
 		if !ok {
-			err = self.Err()
+			err = p.Err()
 			if err == nil {
 				err = ErrorTimeOut
 			}
@@ -118,7 +126,8 @@ func (self *Client) Call(sendData interface{}) (recvData interface{}, err error)
 	return recvData, err
 }
 
-func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
+// CallAsync ...
+func (p *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 	//	if self.IsClosed() {
 	//		return nil, ErrorClosed
 	//	}
@@ -127,60 +136,60 @@ func (self *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) 
 		encodeData interface{}
 		err        error
 	)
-	id, encodeData, err = self.handler.Encode(sendData)
+	id, encodeData, err = p.handler.Encode(sendData)
 	if err != nil {
 		return nil, err
 	}
 
 	recvChan := make(chan interface{}, 1)
-	self.Lock()
-	if _, ok := self.recvChans[id]; ok {
+	p.Lock()
+	if _, ok := p.recvChans[id]; ok {
 		err = Errof("[chanrpc] repeated id, id=%v", id)
 	} else {
-		self.recvChans[id] = recvChan
+		p.recvChans[id] = recvChan
 	}
-	self.Unlock()
+	p.Unlock()
 	if err != nil {
 		return nil, err
 	}
 
 	f := func() {
-		self.Lock()
-		r, ok := self.recvChans[id]
+		p.Lock()
+		r, ok := p.recvChans[id]
 		if ok && r == recvChan {
 			close(recvChan)
-			delete(self.recvChans, id)
+			delete(p.recvChans, id)
 		}
-		self.Unlock()
+		p.Unlock()
 	}
-	gotimer.AfterFunc(self.timeout, func() {
+	gotimer.AfterFunc(p.timeout, func() {
 		go f()
 	},
 	)
 
-	err = self.handler.Send(encodeData)
+	err = p.handler.Send(encodeData)
 	if err != nil {
 		return nil, err
 	}
 	return recvChan, nil
 }
 
-func (self *Client) Close() error {
-	if self.IsClosed() {
+// Close ...
+func (p *Client) Close() error {
+	if !atomic.CompareAndSwapInt32(&p.status, 0, 1) {
 		return nil
 	}
 
-	atomic.StoreInt32(&self.status, 1)
 	go func() {
 		<-gotimer.After(time.Second)
 		flag := true
 		for flag {
-			self.Lock()
-			if len(self.recvChans) == 0 {
+			p.Lock()
+			if len(p.recvChans) == 0 {
 				flag = false
-				self.handler.Close()
+				p.handler.Close()
 			}
-			self.Unlock()
+			p.Unlock()
 			if flag {
 				time.Sleep(time.Second)
 			}
@@ -189,37 +198,37 @@ func (self *Client) Close() error {
 	return nil
 }
 
-func (self *Client) run() {
+func (p *Client) run() {
 	for {
-		buf, err := self.handler.Recv()
+		buf, err := p.handler.Recv()
 		if err != nil {
-			self.errLock.Lock()
-			self.err = err
-			self.errLock.Unlock()
-			self.Lock()
-			for k, v := range self.recvChans {
-				delete(self.recvChans, k)
+			p.errLock.Lock()
+			p.err = err
+			p.errLock.Unlock()
+			p.Lock()
+			for k, v := range p.recvChans {
+				delete(p.recvChans, k)
 				close(v)
 			}
-			self.recvChans = nil
-			self.Unlock()
+			p.recvChans = nil
+			p.Unlock()
 			break
 		}
 		//	go func(buf interface{}, self *Client) {
-		id, decodeData, e := self.handler.Decode(buf)
+		id, decodeData, e := p.handler.Decode(buf)
 		if e != nil {
 			return
 		}
-		self.Lock()
-		recvChan, ok := self.recvChans[id]
+		p.Lock()
+		recvChan, ok := p.recvChans[id]
 		if ok {
 			select {
 			case recvChan <- decodeData:
 			default:
 			}
-			delete(self.recvChans, id)
+			delete(p.recvChans, id)
 		}
-		self.Unlock()
+		p.Unlock()
 		//	}(buf, self)
 	}
 }
