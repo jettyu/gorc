@@ -36,46 +36,13 @@ type testTCPServer struct {
 }
 
 type testTCPClient struct {
-	conn   net.Conn
-	bw     *bufio.Writer
-	br     *bufio.Reader
-	id     uint32
-	err    error
-	closed bool
-	rLock  sync.Mutex
-	wLock  sync.Mutex
-	eLock  sync.RWMutex
-	cLock  sync.RWMutex
-}
-
-func (p *testTCPClient) SetErr(err error) {
-	p.eLock.Lock()
-	p.err = err
-	p.eLock.Unlock()
-}
-
-func (p *testTCPClient) Err() error {
-	p.eLock.Lock()
-	err := p.err
-	p.eLock.Unlock()
-	return err
+	conn net.Conn
+	br   *bufio.Reader
+	id   uint32
 }
 
 func (p *testTCPClient) Close() error {
-	p.cLock.Lock()
-	defer p.cLock.Unlock()
-	if p.closed {
-		return nil
-	}
-	p.closed = true
 	return p.conn.Close()
-}
-
-func (p *testTCPClient) Closed() bool {
-	p.cLock.RLock()
-	closed := p.closed
-	p.cLock.RUnlock()
-	return closed
 }
 
 func (p *testTCPClient) BuildMessage(data interface{}) (msg gosr.Message, err error) {
@@ -90,21 +57,21 @@ func (p *testTCPClient) BuildMessage(data interface{}) (msg gosr.Message, err er
 }
 
 func (p *testTCPClient) SendMessage(msg gosr.Message) (err error) {
-	p.wLock.Lock()
-	defer p.wLock.Unlock()
-	n, e := p.bw.WriteString(string(msg.(testMessage)))
+	n, e := p.conn.Write([]byte(msg.(testMessage)))
 	if e != nil {
-		return e
+		err = e
+		log.Println(err)
+		return
 	}
 	if n != len(msg.(testMessage)) {
-		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(msg.(testMessage)), n)
+		err = fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(msg.(testMessage)), n)
+		log.Println(err)
+		return
 	}
-	return p.bw.Flush()
+	return
 }
 
 func (p *testTCPClient) RecvMessage() (msg gosr.Message, err error) {
-	p.rLock.Lock()
-	defer p.rLock.Unlock()
 	buf, e := p.br.ReadBytes(0x3)
 	if e != nil {
 		log.Println(e)
@@ -176,7 +143,6 @@ func testTCPClientConn(addr string) error {
 		return err
 	}
 	_testTCPCodec.conn = conn
-	_testTCPCodec.bw = bufio.NewWriter(conn)
 	_testTCPCodec.br = bufio.NewReader(conn)
 	return nil
 }
