@@ -126,10 +126,12 @@ func (p *client) AsyncCall(req interface{}) (resp <-chan interface{}, err error)
 		}
 		p.Unlock()
 	}
-	gotimer.AfterFunc(p.timeout, func() {
-		go f()
-	},
-	)
+	if p.timeout > 0 {
+		gotimer.AfterFunc(p.timeout, func() {
+			go f()
+		},
+		)
+	}
 
 	err = p.codec.SendMessage(reqMsg)
 	if err != nil {
