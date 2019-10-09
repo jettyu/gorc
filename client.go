@@ -1,6 +1,7 @@
-package gorc
+package gosr
 
 import (
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -8,19 +9,35 @@ import (
 	"github.com/jettyu/gotimer"
 )
 
-// ClientConnInterface ...
-type ClientConnInterface interface {
-	Encode(interface{}) (id interface{}, encodeData interface{}, err error)
-	Decode(interface{}) (id interface{}, decodeData interface{}, err error)
-	Send(interface{}) (err error)
-	Recv() (buf interface{}, err error)
+// Message ...
+type Message interface {
+	Seq() interface{}
+	Data() interface{}
+}
+
+// Codec ...
+type Codec interface {
+	BuildMessage(data interface{}) (Message, error)
+	SendMessage(Message) error
+	RecvMessage() (Message, error)
 	Close() error
 }
 
 // Client ...
-type Client struct {
+type Client interface {
+	Call(req interface{}) (resp interface{}, err error)
+	AsyncCall(req interface{}) (resp <-chan interface{}, err error)
+	io.Closer
+	IsClosed() bool
+	Err() error
+	SetErr(err error)
+	GetCodec() Codec
+}
+
+// client ...
+type client struct {
 	recvChans map[interface{}]chan interface{}
-	handler   ClientConnInterface
+	codec     Codec
 	timeout   time.Duration
 	err       error
 	errLock   sync.RWMutex
@@ -29,10 +46,10 @@ type Client struct {
 }
 
 // NewClient ...
-func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
-	c := &Client{
+func NewClient(codec Codec, timeout time.Duration) Client {
+	c := &client{
 		recvChans: make(map[interface{}]chan interface{}),
-		handler:   handler,
+		codec:     codec,
 		timeout:   timeout,
 	}
 	go c.run()
@@ -40,7 +57,7 @@ func NewClient(handler ClientConnInterface, timeout time.Duration) *Client {
 }
 
 // Err ...
-func (p *Client) Err() error {
+func (p *client) Err() error {
 	p.errLock.RLock()
 	err := p.err
 	p.errLock.RUnlock()
@@ -48,98 +65,45 @@ func (p *Client) Err() error {
 }
 
 // SetErr ...
-func (p *Client) SetErr(err error) {
+func (p *client) SetErr(err error) {
 	p.errLock.Lock()
 	p.err = err
 	p.errLock.Unlock()
 }
 
-// GetHandler ...
-func (p *Client) GetHandler() ClientConnInterface {
-	return p.handler
+// GetCodec ...
+func (p *client) GetCodec() Codec {
+	return p.codec
 }
 
 // IsClosed ...
-func (p *Client) IsClosed() bool {
+func (p *client) IsClosed() bool {
 	return atomic.LoadInt32(&p.status) == 1
 }
 
 // Call ...
-func (p *Client) Call(sendData interface{}) (recvData interface{}, err error) {
-	//	if self.IsClosed() {
-	//		return nil, ErrorClosed
-	//	}
-	var (
-		id         interface{}
-		encodeData interface{}
-	)
-	id, encodeData, err = p.handler.Encode(sendData)
-	if err != nil {
-		return nil, err
+func (p *client) Call(req interface{}) (resp interface{}, err error) {
+	respChan, e := p.AsyncCall(req)
+	if e != nil {
+		err = e
+		return
 	}
-
-	recvChan := make(chan interface{}, 1)
-	p.Lock()
-	if _, ok := p.recvChans[id]; ok {
-		err = Errof("[chanrpc] repeated id, id=%v", id)
-	} else {
-		p.recvChans[id] = recvChan
-	}
-	p.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	closeChan := make(chan struct{})
-	f := func() {
-		select {
-		case <-closeChan:
-			return
-		default:
-		}
-		p.Lock()
-		_, ok := p.recvChans[id]
-		if ok {
-			close(recvChan)
-			delete(p.recvChans, id)
-		}
-		p.Unlock()
-	}
-	gotimer.AfterFunc(p.timeout, func() {
-		go f()
-	},
-	)
-	err = p.handler.Send(encodeData)
-	if err != nil {
-		return nil, err
-	}
-	ok := true
-	select {
-	case recvData, ok = <-recvChan:
-		if !ok {
-			err = p.Err()
-			if err == nil {
-				err = ErrorTimeOut
-			}
-		}
-	}
-	close(closeChan)
-	return recvData, err
+	resp = <-respChan
+	return
 }
 
-// CallAsync ...
-func (p *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
+// AsyncCall ...
+func (p *client) AsyncCall(req interface{}) (resp <-chan interface{}, err error) {
 	//	if self.IsClosed() {
 	//		return nil, ErrorClosed
 	//	}
-	var (
-		id         interface{}
-		encodeData interface{}
-		err        error
-	)
-	id, encodeData, err = p.handler.Encode(sendData)
-	if err != nil {
-		return nil, err
+
+	reqMsg, e := p.codec.BuildMessage(req)
+	if e != nil {
+		err = e
+		return
 	}
+	id := reqMsg.Seq()
 
 	recvChan := make(chan interface{}, 1)
 	p.Lock()
@@ -167,7 +131,7 @@ func (p *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 	},
 	)
 
-	err = p.handler.Send(encodeData)
+	err = p.codec.SendMessage(reqMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +139,7 @@ func (p *Client) CallAsync(sendData interface{}) (<-chan interface{}, error) {
 }
 
 // Close ...
-func (p *Client) Close() error {
+func (p *client) Close() error {
 	if !atomic.CompareAndSwapInt32(&p.status, 0, 1) {
 		return nil
 	}
@@ -187,7 +151,7 @@ func (p *Client) Close() error {
 			p.Lock()
 			if len(p.recvChans) == 0 {
 				flag = false
-				p.handler.Close()
+				p.codec.Close()
 			}
 			p.Unlock()
 			if flag {
@@ -198,9 +162,9 @@ func (p *Client) Close() error {
 	return nil
 }
 
-func (p *Client) run() {
+func (p *client) run() {
 	for {
-		buf, err := p.handler.Recv()
+		resp, err := p.codec.RecvMessage()
 		if err != nil {
 			p.errLock.Lock()
 			p.err = err
@@ -214,16 +178,12 @@ func (p *Client) run() {
 			p.Unlock()
 			break
 		}
-		//	go func(buf interface{}, self *Client) {
-		id, decodeData, e := p.handler.Decode(buf)
-		if e != nil {
-			return
-		}
+		id := resp.Seq()
 		p.Lock()
 		recvChan, ok := p.recvChans[id]
 		if ok {
 			select {
-			case recvChan <- decodeData:
+			case recvChan <- resp.Data():
 			default:
 			}
 			delete(p.recvChans, id)

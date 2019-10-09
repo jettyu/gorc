@@ -1,4 +1,4 @@
-package gorc
+package gosr
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ func Errof(format string, args ...interface{}) Error {
 
 var (
 	// ErrorTimeOut ...
-	ErrorTimeOut Error = fmt.Errorf("[gorc] timeout")
+	ErrorTimeOut Error = fmt.Errorf("[gosr] timeout")
 	// ErrorClosed ...
-	ErrorClosed Error = fmt.Errorf("[gorc] closed")
+	ErrorClosed Error = fmt.Errorf("[gosr] closed")
 )

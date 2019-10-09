@@ -1,4 +1,4 @@
-package gorc
+package gosr_test
 
 import (
 	"bufio"
@@ -10,14 +10,26 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jettyu/gosr"
 )
 
 var (
-	_testTCPServer  testTCPServer
-	_testTCPClient  testTCPClient
-	_testGorcClient *Client
-	wg              sync.WaitGroup
+	_testTCPServer testTCPServer
+	_testTCPCodec  testTCPClient
+	_testClient    gosr.Client
+	wg             sync.WaitGroup
 )
+
+type testMessage string
+
+func (p testMessage) Seq() interface{} {
+	return string(p)[:4]
+}
+
+func (p testMessage) Data() interface{} {
+	return string(p)[4 : len(p)-1]
+}
 
 type testTCPServer struct {
 	l net.Listener
@@ -66,44 +78,41 @@ func (p *testTCPClient) Closed() bool {
 	return closed
 }
 
-func (p *testTCPClient) Encode(data interface{}) (id interface{}, encodeData interface{}, err error) {
-	id = fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
+func (p *testTCPClient) BuildMessage(data interface{}) (msg gosr.Message, err error) {
+	id := fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
 	var buffer bytes.Buffer
-	buffer.WriteString(id.(string))
-	buffer.Write(data.([]byte))
+	buffer.WriteString(id)
+	buffer.WriteString(data.(string))
 	buffer.WriteByte(0x3)
-	return id, buffer.Bytes(), nil
+	msg = testMessage(buffer.String())
+	return
+	// return id, buffer.Bytes(), nil
 }
 
-func (p *testTCPClient) Decode(data interface{}) (id interface{}, encodeData interface{}, err error) {
-	buf := data.([]byte)
-	if len(buf) < 4 {
-		err := fmt.Errorf("conn Recv wrong size, min size=%d, buf size=%d", 4, len(buf))
-		return nil, nil, err
-	}
-	id = string(buf[:4])
-	return id, buf[4 : len(buf)-1], nil
-}
-
-func (p *testTCPClient) Send(data interface{}) (err error) {
-	buf := data.([]byte)
+func (p *testTCPClient) SendMessage(msg gosr.Message) (err error) {
 	p.wLock.Lock()
 	defer p.wLock.Unlock()
-	n, e := p.bw.Write(buf)
+	n, e := p.bw.WriteString(string(msg.(testMessage)))
 	if e != nil {
 		return e
 	}
-	if n != len(buf) {
-		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(buf), n)
+	if n != len(msg.(testMessage)) {
+		return fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(msg.(testMessage)), n)
 	}
 	return p.bw.Flush()
 }
 
-func (p *testTCPClient) Recv() (data interface{}, err error) {
+func (p *testTCPClient) RecvMessage() (msg gosr.Message, err error) {
 	p.rLock.Lock()
 	defer p.rLock.Unlock()
 	buf, e := p.br.ReadBytes(0x3)
-	return buf, e
+	if e != nil {
+		log.Println(e)
+		err = e
+		return
+	}
+	msg = testMessage(buf)
+	return
 }
 
 var (
@@ -166,15 +175,15 @@ func testTCPClientConn(addr string) error {
 	if err != nil {
 		return err
 	}
-	_testTCPClient.conn = conn
-	_testTCPClient.bw = bufio.NewWriter(conn)
-	_testTCPClient.br = bufio.NewReader(conn)
+	_testTCPCodec.conn = conn
+	_testTCPCodec.bw = bufio.NewWriter(conn)
+	_testTCPCodec.br = bufio.NewReader(conn)
 	return nil
 }
 
 func testTCPClientClose() {
-	if _testTCPClient.conn != nil {
-		_testTCPClient.conn.Close()
+	if _testTCPCodec.conn != nil {
+		_testTCPCodec.conn.Close()
 	}
 }
 
@@ -188,7 +197,7 @@ func testStart(t *testing.T) {
 	}
 	wg.Add(1)
 	defer wg.Done()
-	_testGorcClient = NewClient(&_testTCPClient, time.Second*2)
+	_testClient = gosr.NewClient(&_testTCPCodec, time.Second*2)
 }
 
 func testStop(t *testing.T) {
@@ -208,12 +217,12 @@ func TestClient(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			sendStr := fmt.Sprint("hello", i)
-			recvData, err := _testGorcClient.Call([]byte(sendStr))
+			recvData, err := _testClient.Call(sendStr)
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			recvStr := string(recvData.([]byte))
+			recvStr := recvData.(string)
 			if sendStr != recvStr {
 				t.Errorf("sendLen=%d and recvLen=%d", len(sendStr), len(recvStr))
 				t.Errorf("sendStr=%s and recvStr=%s", sendStr, recvStr)
@@ -233,17 +242,17 @@ func TestCallAsync(t *testing.T) {
 		sendStr2 = "hello1"
 		sendStr3 = "hello2"
 	)
-	recv1, err1 := _testGorcClient.CallAsync([]byte(sendStr1))
+	recv1, err1 := _testClient.AsyncCall(sendStr1)
 	if err1 != nil {
 		t.Error(err1)
 		return
 	}
-	recv2, err2 := _testGorcClient.CallAsync([]byte(sendStr2))
+	recv2, err2 := _testClient.AsyncCall(sendStr2)
 	if err2 != nil {
 		t.Error(err2)
 		return
 	}
-	recv3, err3 := _testGorcClient.CallAsync([]byte(sendStr3))
+	recv3, err3 := _testClient.AsyncCall(sendStr3)
 	if err3 != nil {
 		t.Error(err3)
 		return
@@ -252,13 +261,13 @@ func TestCallAsync(t *testing.T) {
 		select {
 		case data, ok := <-recv1:
 			if !ok {
-				if err := _testGorcClient.Err(); err != nil {
+				if err := _testClient.Err(); err != nil {
 					t.Errorf("recv1 recv failed err=%s", err.Error())
 					break
 				}
 				t.Errorf("recv1 recv failed timeout")
 			} else {
-				recvStr1 := string(data.([]byte))
+				recvStr1 := data.(string)
 				if recvStr1 != sendStr1 {
 					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr1), len(recvStr1))
 					t.Errorf("sendStr=%s and recvStr=%s", sendStr1, recvStr1)
@@ -266,13 +275,13 @@ func TestCallAsync(t *testing.T) {
 			}
 		case data, ok := <-recv2:
 			if !ok {
-				if err := _testGorcClient.Err(); err != nil {
+				if err := _testClient.Err(); err != nil {
 					t.Errorf("recv2 recv failed err=%s", err.Error())
 					break
 				}
 				t.Errorf("recv2 recv failed timeout")
 			} else {
-				recvStr2 := string(data.([]byte))
+				recvStr2 := data.(string)
 				if recvStr2 != sendStr2 {
 					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr2), len(recvStr2))
 					t.Errorf("sendStr=%s and recvStr=%s", sendStr2, recvStr2)
@@ -280,13 +289,13 @@ func TestCallAsync(t *testing.T) {
 			}
 		case data, ok := <-recv3:
 			if !ok {
-				if err := _testGorcClient.Err(); err != nil {
+				if err := _testClient.Err(); err != nil {
 					t.Errorf("recv3 recv failed err=%s", err.Error())
 					break
 				}
 				t.Errorf("recv3 recv failed timeout")
 			} else {
-				recvStr3 := string(data.([]byte))
+				recvStr3 := data.(string)
 				if recvStr3 != sendStr3 {
 					t.Errorf("sendLen=%d and recvLen=%d", len(sendStr3), len(recvStr3))
 					t.Errorf("sendStr=%s and recvStr=%s", sendStr3, recvStr3)

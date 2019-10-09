@@ -1,2 +1,3 @@
-# gorc
-a simple frame of rpc client for golang
+# gosr
+
+a simple frame of send and receive on conn for golang
