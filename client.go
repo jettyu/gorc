@@ -27,6 +27,7 @@ type Codec interface {
 type Client interface {
 	Call(req interface{}) (resp interface{}, err error)
 	AsyncCall(req interface{}) (resp <-chan interface{}, err error)
+	WaitClose()
 	io.Closer
 	IsClosed() bool
 	Err() error
@@ -42,7 +43,8 @@ type client struct {
 	err       error
 	errLock   sync.RWMutex
 	sync.Mutex
-	status int32
+	status   int32
+	waitChan chan struct{}
 }
 
 // NewClient ...
@@ -51,9 +53,14 @@ func NewClient(codec Codec, timeout time.Duration) Client {
 		recvChans: make(map[interface{}]chan interface{}),
 		codec:     codec,
 		timeout:   timeout,
+		waitChan:  make(chan struct{}),
 	}
 	go c.run()
 	return c
+}
+
+func (p *client) WaitClose() {
+	<-p.waitChan
 }
 
 // Err ...
@@ -165,6 +172,7 @@ func (p *client) Close() error {
 }
 
 func (p *client) run() {
+	defer close(p.waitChan)
 	for {
 		resp, err := p.codec.RecvMessage()
 		if err != nil {
