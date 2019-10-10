@@ -11,8 +11,8 @@ import (
 
 // Message ...
 type Message interface {
-	Seq() interface{}
-	Data() interface{}
+	GetSeq() interface{}
+	GetData() interface{}
 }
 
 // Codec ...
@@ -110,7 +110,7 @@ func (p *client) AsyncCall(req interface{}) (resp <-chan interface{}, err error)
 		err = e
 		return
 	}
-	id := reqMsg.Seq()
+	id := reqMsg.GetSeq()
 
 	recvChan := make(chan interface{}, 1)
 	p.Lock()
@@ -188,12 +188,12 @@ func (p *client) run() {
 			p.Unlock()
 			break
 		}
-		id := resp.Seq()
+		id := resp.GetSeq()
 		p.Lock()
 		recvChan, ok := p.recvChans[id]
 		if ok {
 			select {
-			case recvChan <- resp.Data():
+			case recvChan <- resp.GetData():
 			default:
 			}
 			delete(p.recvChans, id)

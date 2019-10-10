@@ -23,11 +23,11 @@ var (
 
 type testMessage string
 
-func (p testMessage) Seq() interface{} {
+func (p testMessage) GetSeq() interface{} {
 	return string(p)[:4]
 }
 
-func (p testMessage) Data() interface{} {
+func (p testMessage) GetData() interface{} {
 	return string(p)[4 : len(p)-1]
 }
 
