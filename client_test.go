@@ -20,20 +20,6 @@ var (
 	wg             sync.WaitGroup
 )
 
-type testMessage string
-
-func (p testMessage) GetSeq() interface{} {
-	return string(p)[:4]
-}
-
-func (p testMessage) GetData() interface{} {
-	return string(p)[4 : len(p)-1]
-}
-
-func (p testMessage) Err() error {
-	return nil
-}
-
 type testTCPServer struct {
 	l net.Listener
 }
@@ -48,33 +34,32 @@ func (p *testTCPClient) Close() error {
 	return p.conn.Close()
 }
 
-func (p *testTCPClient) BuildRequest(data interface{}) (msg gosr.Request, err error) {
-	id := fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
-	msg = testMessage(id)
+func (p *testTCPClient) BuildRequest(req *gosr.Request) (err error) {
+	req.Seq = fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
 	return
 	// return id, buffer.Bytes(), nil
 }
 
-func (p *testTCPClient) WriteRequest(msg gosr.Request, args interface{}) (err error) {
-	var buffer bytes.Buffer
-	buffer.WriteString(string(msg.(testMessage)))
-	buffer.WriteString(args.(string))
-	buffer.WriteByte(0x3)
-	n, e := p.conn.Write(buffer.Bytes())
+func (p *testTCPClient) WriteRequest(req *gosr.Request, args interface{}) (err error) {
+	var buf bytes.Buffer
+	buf.WriteString(req.Seq.(string))
+	buf.WriteString(args.(string))
+	buf.WriteByte(0x3)
+	n, e := p.conn.Write(buf.Bytes())
 	if e != nil {
 		err = e
 		log.Println(err)
 		return
 	}
-	if n != buffer.Len() {
-		err = fmt.Errorf("write not complete, bufLen=%d, writeN=%d", len(msg.(testMessage)), n)
+	if n != buf.Len() {
+		err = fmt.Errorf("write not complete, bufLen=%d, writeN=%d", buf.Len(), n)
 		log.Println(err)
 		return
 	}
 	return
 }
 
-func (p *testTCPClient) ReadResponseHeader() (msg gosr.Response, err error) {
+func (p *testTCPClient) ReadResponseHeader(rsp *gosr.Response) (err error) {
 	idbuf := make([]byte, 4)
 	_, err = p.br.Read(idbuf)
 	if err != nil {
@@ -82,12 +67,12 @@ func (p *testTCPClient) ReadResponseHeader() (msg gosr.Response, err error) {
 		return
 	}
 
-	msg = testMessage(idbuf)
+	rsp.Seq = string(idbuf)
 	return
 }
 
 // ReadResponseBody ...
-func (p *testTCPClient) ReadResponseBody(header gosr.Response, reply interface{}) (err error) {
+func (p *testTCPClient) ReadResponseBody(rsp *gosr.Response, reply interface{}) (err error) {
 	buf, e := p.br.ReadBytes(0x3)
 	if e != nil {
 		log.Println(e)
@@ -200,7 +185,7 @@ func TestClient(t *testing.T) {
 			defer wg.Done()
 			sendStr := fmt.Sprint("hello", i)
 			recvStr := ""
-			err := _testClient.Call(sendStr, &recvStr)
+			err := _testClient.Call(nil, sendStr, &recvStr)
 			if err != nil {
 				t.Error(err)
 				return

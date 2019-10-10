@@ -10,21 +10,26 @@ import (
 
 // Call represents an active RPC.
 type Call struct {
-	Args  interface{} // The argument to the function (*struct).
-	Reply interface{} // The reply from the function (*struct).
-	Error error       // After completion, the error status.
-	Done  chan *Call  // Strobes when call is complete.
+	ServiceMethod interface{}
+	Args          interface{} // The argument to the function (*struct).
+	Reply         interface{} // The reply from the function (*struct).
+	Error         error       // After completion, the error status.
+	Done          chan *Call  // Strobes when call is complete.
 }
 
 // Request ...
-type Request interface {
-	GetSeq() interface{}
+type Request struct {
+	Seq           interface{}
+	ServiceMethod interface{}
+	Context       interface{}
 }
 
 // Response ...
-type Response interface {
-	GetSeq() interface{}
-	Err() error
+type Response struct {
+	Seq           interface{}
+	ServiceMethod interface{}
+	Error         error
+	Context       interface{}
 }
 
 // A ClientCodec implements writing of RPC requests and
@@ -37,18 +42,18 @@ type Response interface {
 // discarded.
 // See NewClient's comment for information about concurrent access.
 type ClientCodec interface {
-	BuildRequest(args interface{}) (Request, error)
-	WriteRequest(req Request, args interface{}) error
-	ReadResponseHeader() (Response, error)
-	ReadResponseBody(resp Response, reply interface{}) error
+	BuildRequest(req *Request) error
+	WriteRequest(req *Request, args interface{}) error
+	ReadResponseHeader(*Response) error
+	ReadResponseBody(resp *Response, reply interface{}) error
 	Close() error
 }
 
 // Client ...
 type Client interface {
 	Close() error
-	Go(args interface{}, reply interface{}, done chan *Call) *Call
-	Call(args interface{}, reply interface{}) error
+	Go(serviceMethod, args interface{}, reply interface{}, done chan *Call) *Call
+	Call(serviceMethod, args interface{}, reply interface{}) error
 	Wait()
 }
 
@@ -103,8 +108,9 @@ func (p *client) Close() error {
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (p *client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
+func (p *client) Go(serviceMethod, args interface{}, reply interface{}, done chan *Call) *Call {
 	call := new(Call)
+	call.ServiceMethod = serviceMethod
 	call.Args = args
 	call.Reply = reply
 	if done == nil {
@@ -124,13 +130,16 @@ func (p *client) Go(args interface{}, reply interface{}, done chan *Call) *Call 
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
-func (p *client) Call(args interface{}, reply interface{}) error {
-	call := <-p.Go(args, reply, make(chan *Call, 1)).Done
+func (p *client) Call(serviceMethod, args interface{}, reply interface{}) error {
+	call := <-p.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
 }
 
 func (p *client) send(call *Call) {
-	req, err := p.codec.BuildRequest(call.Args)
+	req := Request{
+		ServiceMethod: call.ServiceMethod,
+	}
+	err := p.codec.BuildRequest(&req)
 	if err != nil {
 		call.Error = err
 		call.done()
@@ -144,7 +153,7 @@ func (p *client) send(call *Call) {
 		call.done()
 		return
 	}
-	seq := req.GetSeq()
+	seq := req.Seq
 	_, ok := p.pending[seq]
 	if ok {
 		p.mutex.Unlock()
@@ -172,7 +181,7 @@ func (p *client) send(call *Call) {
 		})
 	}
 	// Encode and send the request.
-	err = p.codec.WriteRequest(req, call.Args)
+	err = p.codec.WriteRequest(&req, call.Args)
 	if err != nil {
 		p.mutex.Lock()
 		call = p.pending[seq]
@@ -190,11 +199,11 @@ func (p *client) input() {
 	var err error
 	var response Response
 	for err == nil {
-		response, err = p.codec.ReadResponseHeader()
+		err = p.codec.ReadResponseHeader(&response)
 		if err != nil {
 			break
 		}
-		seq := response.GetSeq()
+		seq := response.Seq
 		p.mutex.Lock()
 		call := p.pending[seq]
 		delete(p.pending, seq)
@@ -207,22 +216,22 @@ func (p *client) input() {
 			// removed; response is a server telling us about an
 			// error reading request body. We should still attempt
 			// to read error body, but there's no one to give it to.
-			err = p.codec.ReadResponseBody(response, nil)
+			err = p.codec.ReadResponseBody(&response, nil)
 			if err != nil {
 				err = errors.New("reading error body: " + err.Error())
 			}
-		case response.Err() != nil:
+		case response.Error != nil:
 			// We've got an error response. Give this to the request;
 			// any subsequent requests will get the ReadResponseBody
 			// error if there is one.
-			call.Error = response.Err()
-			err = p.codec.ReadResponseBody(response, nil)
+			call.Error = response.Error
+			err = p.codec.ReadResponseBody(&response, nil)
 			if err != nil {
 				err = errors.New("reading error body: " + err.Error())
 			}
 			call.done()
 		default:
-			err = p.codec.ReadResponseBody(response, call.Reply)
+			err = p.codec.ReadResponseBody(&response, call.Reply)
 			if err != nil {
 				call.Error = errors.New("reading body " + err.Error())
 			}
