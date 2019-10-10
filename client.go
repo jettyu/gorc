@@ -44,11 +44,19 @@ type ClientCodec interface {
 	Close() error
 }
 
-// Client represents an RPC Client.
+// Client ...
+type Client interface {
+	Close() error
+	Go(args interface{}, reply interface{}, done chan *Call) *Call
+	Call(args interface{}, reply interface{}) error
+	Wait()
+}
+
+// client represents an RPC client.
 // There may be multiple outstanding Calls associated
-// with a single Client, and a Client may be used by
+// with a single client, and a client may be used by
 // multiple goroutines simultaneously.
-type Client struct {
+type client struct {
 	codec    ClientCodec
 	mutex    sync.Mutex // protects following
 	pending  map[interface{}]*Call
@@ -59,14 +67,14 @@ type Client struct {
 }
 
 // Wait ...
-func (p *Client) Wait() {
+func (p *client) Wait() {
 	p.waited.Wait()
 }
 
 // NewClientWithCodec is like NewClient but uses the specified
 // codec to encode requests and decode responses.
-func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) *Client {
-	p := &Client{
+func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) Client {
+	p := &client{
 		codec:   codec,
 		pending: make(map[interface{}]*Call),
 	}
@@ -80,7 +88,7 @@ func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) *Client {
 
 // Close calls the underlying codec's Close method. If the connection is already
 // shutting down, ErrClosed is returned.
-func (p *Client) Close() error {
+func (p *client) Close() error {
 	p.mutex.Lock()
 	if p.closing {
 		p.mutex.Unlock()
@@ -95,7 +103,7 @@ func (p *Client) Close() error {
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (p *Client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
+func (p *client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
 	call := new(Call)
 	call.Args = args
 	call.Reply = reply
@@ -116,12 +124,12 @@ func (p *Client) Go(args interface{}, reply interface{}, done chan *Call) *Call 
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
-func (p *Client) Call(args interface{}, reply interface{}) error {
+func (p *client) Call(args interface{}, reply interface{}) error {
 	call := <-p.Go(args, reply, make(chan *Call, 1)).Done
 	return call.Error
 }
 
-func (p *Client) send(call *Call) {
+func (p *client) send(call *Call) {
 	req, err := p.codec.BuildRequest(call.Args)
 	if err != nil {
 		call.Error = err
@@ -177,7 +185,7 @@ func (p *Client) send(call *Call) {
 	}
 }
 
-func (p *Client) input() {
+func (p *client) input() {
 	defer p.waited.Done()
 	var err error
 	var response Response

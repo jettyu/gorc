@@ -16,7 +16,7 @@ import (
 var (
 	_testTCPServer testTCPServer
 	_testTCPCodec  testTCPClient
-	_testClient    *gosr.Client
+	_testClient    gosr.Client
 	wg             sync.WaitGroup
 )
 
