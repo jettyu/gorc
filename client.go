@@ -1,204 +1,251 @@
 package gosr
 
 import (
+	"errors"
 	"io"
+	"log"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/jettyu/gotimer"
 )
 
-// Message ...
-type Message interface {
-	GetSeq() interface{}
-	GetData() interface{}
+// Call represents an active RPC.
+type Call struct {
+	Args  interface{} // The argument to the function (*struct).
+	Reply interface{} // The reply from the function (*struct).
+	Error error       // After completion, the error status.
+	Done  chan *Call  // Strobes when call is complete.
 }
 
-// Codec ...
-type Codec interface {
-	BuildMessage(data interface{}) (Message, error)
-	SendMessage(Message) error
-	RecvMessage() (Message, error)
+// Request ...
+type Request interface {
+	GetSeq() interface{}
+}
+
+// Response ...
+type Response interface {
+	GetSeq() interface{}
+	Err() error
+}
+
+// A ClientCodec implements writing of RPC requests and
+// reading of RPC responses for the client side of an RPC session.
+// The client calls WriteRequest to write a request to the connection
+// and calls ReadResponseHeader and ReadResponseBody in pairs
+// to read responses. The client calls Close when finished with the
+// connection. ReadResponseBody may be called with a nil
+// argument to force the body of the response to be read and then
+// discarded.
+// See NewClient's comment for information about concurrent access.
+type ClientCodec interface {
+	BuildRequest(args interface{}) (Request, error)
+	WriteRequest(req Request, args interface{}) error
+	ReadResponseHeader() (Response, error)
+	ReadResponseBody(resp Response, reply interface{}) error
 	Close() error
 }
 
-// Client ...
-type Client interface {
-	Call(req interface{}) (resp interface{}, err error)
-	AsyncCall(req interface{}) (resp <-chan interface{}, err error)
-	WaitClose()
-	io.Closer
-	IsClosed() bool
-	Err() error
-	SetErr(err error)
-	GetCodec() Codec
+// Client represents an RPC Client.
+// There may be multiple outstanding Calls associated
+// with a single Client, and a Client may be used by
+// multiple goroutines simultaneously.
+type Client struct {
+	codec    ClientCodec
+	mutex    sync.Mutex // protects following
+	pending  map[interface{}]*Call
+	closing  bool // user has called Close
+	shutdown bool // server has told us to stop
+	timeout  time.Duration
 }
 
-// client ...
-type client struct {
-	recvChans map[interface{}]chan interface{}
-	codec     Codec
-	timeout   time.Duration
-	err       error
-	errLock   sync.RWMutex
-	sync.Mutex
-	status   int32
-	waitChan chan struct{}
-}
-
-// NewClient ...
-func NewClient(codec Codec, timeout time.Duration) Client {
-	c := &client{
-		recvChans: make(map[interface{}]chan interface{}),
-		codec:     codec,
-		timeout:   timeout,
-		waitChan:  make(chan struct{}),
+// NewClientWithCodec is like NewClient but uses the specified
+// codec to encode requests and decode responses.
+func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) *Client {
+	client := &Client{
+		codec:   codec,
+		pending: make(map[interface{}]*Call),
 	}
-	go c.run()
-	return c
-}
-
-func (p *client) WaitClose() {
-	<-p.waitChan
-}
-
-// Err ...
-func (p *client) Err() error {
-	p.errLock.RLock()
-	err := p.err
-	p.errLock.RUnlock()
-	return err
-}
-
-// SetErr ...
-func (p *client) SetErr(err error) {
-	p.errLock.Lock()
-	p.err = err
-	p.errLock.Unlock()
-}
-
-// GetCodec ...
-func (p *client) GetCodec() Codec {
-	return p.codec
-}
-
-// IsClosed ...
-func (p *client) IsClosed() bool {
-	return atomic.LoadInt32(&p.status) == 1
-}
-
-// Call ...
-func (p *client) Call(req interface{}) (resp interface{}, err error) {
-	respChan, e := p.AsyncCall(req)
-	if e != nil {
-		err = e
-		return
+	if len(timeout) > 0 {
+		client.timeout = timeout[0]
 	}
-	resp = <-respChan
-	return
+	go client.input()
+	return client
 }
 
-// AsyncCall ...
-func (p *client) AsyncCall(req interface{}) (resp <-chan interface{}, err error) {
-	//	if self.IsClosed() {
-	//		return nil, ErrorClosed
-	//	}
-
-	reqMsg, e := p.codec.BuildMessage(req)
-	if e != nil {
-		err = e
-		return
+// Close calls the underlying codec's Close method. If the connection is already
+// shutting down, ErrClosed is returned.
+func (client *Client) Close() error {
+	client.mutex.Lock()
+	if client.closing {
+		client.mutex.Unlock()
+		return ErrClosed
 	}
-	id := reqMsg.GetSeq()
+	client.closing = true
+	client.mutex.Unlock()
+	return client.codec.Close()
+}
 
-	recvChan := make(chan interface{}, 1)
-	p.Lock()
-	if _, ok := p.recvChans[id]; ok {
-		err = Errof("[chanrpc] repeated id, id=%v", id)
+// Go invokes the function asynchronously. It returns the Call structure representing
+// the invocation. The done channel will signal when the call is complete by returning
+// the same Call object. If done is nil, Go will allocate a new channel.
+// If non-nil, done must be buffered or Go will deliberately crash.
+func (client *Client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
+	call := new(Call)
+	call.Args = args
+	call.Reply = reply
+	if done == nil {
+		done = make(chan *Call, 10) // buffered.
 	} else {
-		p.recvChans[id] = recvChan
-	}
-	p.Unlock()
-	if err != nil {
-		return nil, err
-	}
-
-	f := func() {
-		p.Lock()
-		r, ok := p.recvChans[id]
-		if ok && r == recvChan {
-			close(recvChan)
-			delete(p.recvChans, id)
+		// If caller passes done != nil, it must arrange that
+		// done has enough buffer for the number of simultaneous
+		// RPCs that will be using that channel. If the channel
+		// is totally unbuffered, it's best not to run at all.
+		if cap(done) == 0 {
+			log.Panic("rpc: done channel is unbuffered")
 		}
-		p.Unlock()
 	}
-	if p.timeout > 0 {
-		gotimer.AfterFunc(p.timeout, func() {
-			go f()
-		},
-		)
-	}
-
-	err = p.codec.SendMessage(reqMsg)
-	if err != nil {
-		return nil, err
-	}
-	return recvChan, nil
+	call.Done = done
+	client.send(call)
+	return call
 }
 
-// Close ...
-func (p *client) Close() error {
-	if !atomic.CompareAndSwapInt32(&p.status, 0, 1) {
-		return nil
-	}
-
-	go func() {
-		<-gotimer.After(time.Second)
-		flag := true
-		for flag {
-			p.Lock()
-			if len(p.recvChans) == 0 {
-				flag = false
-				p.codec.Close()
-			}
-			p.Unlock()
-			if flag {
-				time.Sleep(time.Second)
-			}
-		}
-	}()
-	return nil
+// Call invokes the named function, waits for it to complete, and returns its error status.
+func (client *Client) Call(args interface{}, reply interface{}) error {
+	call := <-client.Go(args, reply, make(chan *Call, 1)).Done
+	return call.Error
 }
 
-func (p *client) run() {
-	defer close(p.waitChan)
-	for {
-		resp, err := p.codec.RecvMessage()
+func (client *Client) send(call *Call) {
+	req, err := client.codec.BuildRequest(call.Args)
+	if err != nil {
+		call.Error = err
+		call.done()
+		return
+	}
+	// Register this call.
+	client.mutex.Lock()
+	if client.shutdown || client.closing {
+		client.mutex.Unlock()
+		call.Error = ErrClosed
+		call.done()
+		return
+	}
+	seq := req.GetSeq()
+	_, ok := client.pending[seq]
+	if ok {
+		client.mutex.Unlock()
+		call.Error = Errof("[chanrpc] repeated seq, seq=%v", seq)
+		call.done()
+		return
+	}
+	client.pending[seq] = call
+	client.mutex.Unlock()
+	if client.timeout > 0 {
+		time.AfterFunc(client.timeout, func() {
+			client.mutex.Lock()
+			timeoutCall, ok := client.pending[seq]
+			if ok && call == timeoutCall {
+				delete(client.pending, seq)
+				call = timeoutCall
+			} else {
+				call = nil
+			}
+			client.mutex.Unlock()
+			if call != nil {
+				call.Error = ErrTimeOut
+				call.done()
+			}
+		})
+	}
+	// Encode and send the request.
+	err = client.codec.WriteRequest(req, call.Args)
+	if err != nil {
+		client.mutex.Lock()
+		call = client.pending[seq]
+		delete(client.pending, seq)
+		client.mutex.Unlock()
+		if call != nil {
+			call.Error = err
+			call.done()
+		}
+	}
+}
+
+func (client *Client) input() {
+	var err error
+	var response Response
+	for err == nil {
+		response, err = client.codec.ReadResponseHeader()
 		if err != nil {
-			p.errLock.Lock()
-			p.err = err
-			p.errLock.Unlock()
-			p.Lock()
-			for k, v := range p.recvChans {
-				delete(p.recvChans, k)
-				close(v)
-			}
-			p.recvChans = nil
-			p.Unlock()
 			break
 		}
-		id := resp.GetSeq()
-		p.Lock()
-		recvChan, ok := p.recvChans[id]
-		if ok {
-			select {
-			case recvChan <- resp.GetData():
-			default:
+		seq := response.GetSeq()
+		client.mutex.Lock()
+		call := client.pending[seq]
+		delete(client.pending, seq)
+		client.mutex.Unlock()
+
+		switch {
+		case call == nil:
+			// We've got no pending call. That usually means that
+			// WriteRequest partially failed, and call was already
+			// removed; response is a server telling us about an
+			// error reading request body. We should still attempt
+			// to read error body, but there's no one to give it to.
+			err = client.codec.ReadResponseBody(response, nil)
+			if err != nil {
+				err = errors.New("reading error body: " + err.Error())
 			}
-			delete(p.recvChans, id)
+		case response.Err() != nil:
+			// We've got an error response. Give this to the request;
+			// any subsequent requests will get the ReadResponseBody
+			// error if there is one.
+			call.Error = response.Err()
+			err = client.codec.ReadResponseBody(response, nil)
+			if err != nil {
+				err = errors.New("reading error body: " + err.Error())
+			}
+			call.done()
+		default:
+			err = client.codec.ReadResponseBody(response, call.Reply)
+			if err != nil {
+				call.Error = errors.New("reading body " + err.Error())
+			}
+			call.done()
 		}
-		p.Unlock()
-		//	}(buf, self)
+	}
+	// Terminate pending calls.
+	client.mutex.Lock()
+	client.shutdown = true
+	closing := client.closing
+	if err == io.EOF {
+		if closing {
+			err = ErrClosed
+		} else {
+			err = io.ErrUnexpectedEOF
+		}
+	}
+	for _, call := range client.pending {
+		call.Error = err
+		call.done()
+	}
+	client.mutex.Unlock()
+	if debugLog && err != io.EOF && !closing {
+		log.Println("rpc: client protocol error:", err)
+	}
+}
+
+// If set, print log statements for internal and I/O errors.
+var debugLog = false
+
+func (call *Call) done() {
+	select {
+	case call.Done <- call:
+		// ok
+	default:
+		// We don't want to block here. It is the caller's responsibility to make
+		// sure the channel has enough buffer space. See comment in Go().
+		if debugLog {
+			log.Println("rpc: discarding Call reply due to insufficient Done chan capacity")
+		}
 	}
 }
