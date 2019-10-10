@@ -28,10 +28,10 @@ type Response interface {
 }
 
 // A ClientCodec implements writing of RPC requests and
-// reading of RPC responses for the client side of an RPC session.
-// The client calls WriteRequest to write a request to the connection
+// reading of RPC responses for the p side of an RPC session.
+// The p calls WriteRequest to write a request to the connection
 // and calls ReadResponseHeader and ReadResponseBody in pairs
-// to read responses. The client calls Close when finished with the
+// to read responses. The p calls Close when finished with the
 // connection. ReadResponseBody may be called with a nil
 // argument to force the body of the response to be read and then
 // discarded.
@@ -55,40 +55,47 @@ type Client struct {
 	closing  bool // user has called Close
 	shutdown bool // server has told us to stop
 	timeout  time.Duration
+	waited   sync.WaitGroup
+}
+
+// Wait ...
+func (p *Client) Wait() {
+	p.waited.Wait()
 }
 
 // NewClientWithCodec is like NewClient but uses the specified
 // codec to encode requests and decode responses.
 func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) *Client {
-	client := &Client{
+	p := &Client{
 		codec:   codec,
 		pending: make(map[interface{}]*Call),
 	}
 	if len(timeout) > 0 {
-		client.timeout = timeout[0]
+		p.timeout = timeout[0]
 	}
-	go client.input()
-	return client
+	p.waited.Add(1)
+	go p.input()
+	return p
 }
 
 // Close calls the underlying codec's Close method. If the connection is already
 // shutting down, ErrClosed is returned.
-func (client *Client) Close() error {
-	client.mutex.Lock()
-	if client.closing {
-		client.mutex.Unlock()
+func (p *Client) Close() error {
+	p.mutex.Lock()
+	if p.closing {
+		p.mutex.Unlock()
 		return ErrClosed
 	}
-	client.closing = true
-	client.mutex.Unlock()
-	return client.codec.Close()
+	p.closing = true
+	p.mutex.Unlock()
+	return p.codec.Close()
 }
 
 // Go invokes the function asynchronously. It returns the Call structure representing
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (client *Client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
+func (p *Client) Go(args interface{}, reply interface{}, done chan *Call) *Call {
 	call := new(Call)
 	call.Args = args
 	call.Reply = reply
@@ -104,52 +111,52 @@ func (client *Client) Go(args interface{}, reply interface{}, done chan *Call) *
 		}
 	}
 	call.Done = done
-	client.send(call)
+	p.send(call)
 	return call
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
-func (client *Client) Call(args interface{}, reply interface{}) error {
-	call := <-client.Go(args, reply, make(chan *Call, 1)).Done
+func (p *Client) Call(args interface{}, reply interface{}) error {
+	call := <-p.Go(args, reply, make(chan *Call, 1)).Done
 	return call.Error
 }
 
-func (client *Client) send(call *Call) {
-	req, err := client.codec.BuildRequest(call.Args)
+func (p *Client) send(call *Call) {
+	req, err := p.codec.BuildRequest(call.Args)
 	if err != nil {
 		call.Error = err
 		call.done()
 		return
 	}
 	// Register this call.
-	client.mutex.Lock()
-	if client.shutdown || client.closing {
-		client.mutex.Unlock()
+	p.mutex.Lock()
+	if p.shutdown || p.closing {
+		p.mutex.Unlock()
 		call.Error = ErrClosed
 		call.done()
 		return
 	}
 	seq := req.GetSeq()
-	_, ok := client.pending[seq]
+	_, ok := p.pending[seq]
 	if ok {
-		client.mutex.Unlock()
+		p.mutex.Unlock()
 		call.Error = Errof("[chanrpc] repeated seq, seq=%v", seq)
 		call.done()
 		return
 	}
-	client.pending[seq] = call
-	client.mutex.Unlock()
-	if client.timeout > 0 {
-		time.AfterFunc(client.timeout, func() {
-			client.mutex.Lock()
-			timeoutCall, ok := client.pending[seq]
+	p.pending[seq] = call
+	p.mutex.Unlock()
+	if p.timeout > 0 {
+		time.AfterFunc(p.timeout, func() {
+			p.mutex.Lock()
+			timeoutCall, ok := p.pending[seq]
 			if ok && call == timeoutCall {
-				delete(client.pending, seq)
+				delete(p.pending, seq)
 				call = timeoutCall
 			} else {
 				call = nil
 			}
-			client.mutex.Unlock()
+			p.mutex.Unlock()
 			if call != nil {
 				call.Error = ErrTimeOut
 				call.done()
@@ -157,12 +164,12 @@ func (client *Client) send(call *Call) {
 		})
 	}
 	// Encode and send the request.
-	err = client.codec.WriteRequest(req, call.Args)
+	err = p.codec.WriteRequest(req, call.Args)
 	if err != nil {
-		client.mutex.Lock()
-		call = client.pending[seq]
-		delete(client.pending, seq)
-		client.mutex.Unlock()
+		p.mutex.Lock()
+		call = p.pending[seq]
+		delete(p.pending, seq)
+		p.mutex.Unlock()
 		if call != nil {
 			call.Error = err
 			call.done()
@@ -170,19 +177,20 @@ func (client *Client) send(call *Call) {
 	}
 }
 
-func (client *Client) input() {
+func (p *Client) input() {
+	defer p.waited.Done()
 	var err error
 	var response Response
 	for err == nil {
-		response, err = client.codec.ReadResponseHeader()
+		response, err = p.codec.ReadResponseHeader()
 		if err != nil {
 			break
 		}
 		seq := response.GetSeq()
-		client.mutex.Lock()
-		call := client.pending[seq]
-		delete(client.pending, seq)
-		client.mutex.Unlock()
+		p.mutex.Lock()
+		call := p.pending[seq]
+		delete(p.pending, seq)
+		p.mutex.Unlock()
 
 		switch {
 		case call == nil:
@@ -191,7 +199,7 @@ func (client *Client) input() {
 			// removed; response is a server telling us about an
 			// error reading request body. We should still attempt
 			// to read error body, but there's no one to give it to.
-			err = client.codec.ReadResponseBody(response, nil)
+			err = p.codec.ReadResponseBody(response, nil)
 			if err != nil {
 				err = errors.New("reading error body: " + err.Error())
 			}
@@ -200,13 +208,13 @@ func (client *Client) input() {
 			// any subsequent requests will get the ReadResponseBody
 			// error if there is one.
 			call.Error = response.Err()
-			err = client.codec.ReadResponseBody(response, nil)
+			err = p.codec.ReadResponseBody(response, nil)
 			if err != nil {
 				err = errors.New("reading error body: " + err.Error())
 			}
 			call.done()
 		default:
-			err = client.codec.ReadResponseBody(response, call.Reply)
+			err = p.codec.ReadResponseBody(response, call.Reply)
 			if err != nil {
 				call.Error = errors.New("reading body " + err.Error())
 			}
@@ -214,9 +222,9 @@ func (client *Client) input() {
 		}
 	}
 	// Terminate pending calls.
-	client.mutex.Lock()
-	client.shutdown = true
-	closing := client.closing
+	p.mutex.Lock()
+	p.shutdown = true
+	closing := p.closing
 	if err == io.EOF {
 		if closing {
 			err = ErrClosed
@@ -224,13 +232,13 @@ func (client *Client) input() {
 			err = io.ErrUnexpectedEOF
 		}
 	}
-	for _, call := range client.pending {
+	for _, call := range p.pending {
 		call.Error = err
 		call.done()
 	}
-	client.mutex.Unlock()
+	p.mutex.Unlock()
 	if debugLog && err != io.EOF && !closing {
-		log.Println("rpc: client protocol error:", err)
+		log.Println("rpc: p protocol error:", err)
 	}
 }
 
