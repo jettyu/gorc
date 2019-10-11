@@ -42,7 +42,7 @@ type Response struct {
 // discarded.
 // See NewClient's comment for information about concurrent access.
 type ClientCodec interface {
-	BuildRequest(req *Request) error
+	GetSeq(req *Request) (seq interface{})
 	WriteRequest(req *Request, args interface{}) error
 	ReadResponseHeader(*Response) error
 	ReadResponseBody(resp *Response, reply interface{}) error
@@ -139,12 +139,9 @@ func (p *client) send(call *Call) {
 	req := Request{
 		ServiceMethod: call.ServiceMethod,
 	}
-	err := p.codec.BuildRequest(&req)
-	if err != nil {
-		call.Error = err
-		call.done()
-		return
-	}
+	seq := p.codec.GetSeq(&req)
+	req.Seq = seq
+
 	// Register this call.
 	p.mutex.Lock()
 	if p.shutdown || p.closing {
@@ -153,7 +150,6 @@ func (p *client) send(call *Call) {
 		call.done()
 		return
 	}
-	seq := req.Seq
 	_, ok := p.pending[seq]
 	if ok {
 		p.mutex.Unlock()
@@ -181,7 +177,7 @@ func (p *client) send(call *Call) {
 		})
 	}
 	// Encode and send the request.
-	err = p.codec.WriteRequest(&req, call.Args)
+	err := p.codec.WriteRequest(&req, call.Args)
 	if err != nil {
 		p.mutex.Lock()
 		call = p.pending[seq]

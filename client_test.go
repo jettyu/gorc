@@ -34,8 +34,8 @@ func (p *testTCPClient) Close() error {
 	return p.conn.Close()
 }
 
-func (p *testTCPClient) BuildRequest(req *gosr.Request) (err error) {
-	req.Seq = fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
+func (p *testTCPClient) GetSeq(req *gosr.Request) (seq interface{}) {
+	seq = fmt.Sprintf("%04d", atomic.AddUint32(&p.id, 1))
 	return
 	// return id, buffer.Bytes(), nil
 }
