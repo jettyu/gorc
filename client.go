@@ -195,6 +195,7 @@ func (p *client) input() {
 	var err error
 	var response Response
 	for err == nil {
+		response = Response{}
 		err = p.codec.ReadResponseHeader(&response)
 		if err != nil {
 			break
