@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"sync"
-	"time"
 )
 
 // Call represents an active RPC.
@@ -15,6 +14,7 @@ type Call struct {
 	Reply         interface{} // The reply from the function (*struct).
 	Error         error       // After completion, the error status.
 	Done          chan *Call  // Strobes when call is complete.
+	seq           interface{}
 }
 
 // Request ...
@@ -67,7 +67,6 @@ type client struct {
 	pending  map[interface{}]*Call
 	closing  bool // user has called Close
 	shutdown bool // server has told us to stop
-	timeout  time.Duration
 	waited   sync.WaitGroup
 }
 
@@ -78,16 +77,15 @@ func (p *client) Wait() {
 
 // NewClientWithCodec is like NewClient but uses the specified
 // codec to encode requests and decode responses.
-func NewClientWithCodec(codec ClientCodec, timeout ...time.Duration) Client {
+func NewClientWithCodec(codec ClientCodec) Client {
 	p := &client{
 		codec:   codec,
 		pending: make(map[interface{}]*Call),
 	}
-	if len(timeout) > 0 {
-		p.timeout = timeout[0]
-	}
+
 	p.waited.Add(1)
 	go p.input()
+
 	return p
 }
 
@@ -135,13 +133,39 @@ func (p *client) Call(serviceMethod, args interface{}, reply interface{}) error 
 	return call.Error
 }
 
+// // CallWithTimeout invokes the named function, waits for it to complete, and returns its error status.
+// func (p *client) CallWithTimeout(serviceMethod, args interface{}, reply interface{}, timeout time.Duration) error {
+// 	var err error
+// 	timer := time.NewTimer(timeout)
+// 	call := p.Go(serviceMethod, args, reply, make(chan *Call, 1))
+// 	seq := call.seq
+// 	select {
+// 	case call = <-call.Done:
+// 		err = call.Error
+// 	case <-timer.C:
+// 		err = ErrTimeOut
+// 		p.mutex.Lock()
+// 		timeoutCall, ok := p.pending[seq]
+// 		if ok && timeoutCall == call {
+// 			delete(p.pending, seq)
+// 		} else {
+// 			// err = call.Error
+// 		}
+// 		p.mutex.Unlock()
+// 		// call.done()
+// 	}
+// 	timer.Stop()
+// 	log.Println(err)
+// 	return err
+// }
+
 func (p *client) send(call *Call) {
 	req := Request{
 		ServiceMethod: call.ServiceMethod,
 	}
 	seq := p.codec.GetSeq(&req)
 	req.Seq = seq
-
+	call.seq = seq
 	// Register this call.
 	p.mutex.Lock()
 	if p.shutdown || p.closing {
@@ -159,23 +183,23 @@ func (p *client) send(call *Call) {
 	}
 	p.pending[seq] = call
 	p.mutex.Unlock()
-	if p.timeout > 0 {
-		time.AfterFunc(p.timeout, func() {
-			p.mutex.Lock()
-			timeoutCall, ok := p.pending[seq]
-			if ok && call == timeoutCall {
-				delete(p.pending, seq)
-				call = timeoutCall
-			} else {
-				call = nil
-			}
-			p.mutex.Unlock()
-			if call != nil {
-				call.Error = ErrTimeOut
-				call.done()
-			}
-		})
-	}
+	// if p.timeout > 0 {
+	// 	time.AfterFunc(p.timeout, func() {
+	// 		p.mutex.Lock()
+	// 		timeoutCall, ok := p.pending[seq]
+	// 		if ok && call == timeoutCall {
+	// 			delete(p.pending, seq)
+	// 			call = timeoutCall
+	// 		} else {
+	// 			call = nil
+	// 		}
+	// 		p.mutex.Unlock()
+	// 		if call != nil {
+	// 			call.Error = ErrTimeOut
+	// 			call.done()
+	// 		}
+	// 	})
+	// }
 	// Encode and send the request.
 	err := p.codec.WriteRequest(&req, call.Args)
 	if err != nil {

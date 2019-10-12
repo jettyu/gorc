@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jettyu/gosr"
 )
@@ -80,6 +81,9 @@ func (p *testTCPClient) ReadResponseBody(rsp *gosr.Response, reply interface{}) 
 		return
 	}
 	*reply.(*string) = string(buf[:len(buf)-1])
+	if *reply.(*string) == "test_timeout" {
+		<-time.After(time.Second)
+	}
 	return
 }
 
@@ -164,7 +168,7 @@ func testStart(t *testing.T) {
 	}
 	wg.Add(1)
 	defer wg.Done()
-	_testClient = gosr.NewClientWithCodec(&_testTCPCodec, 0)
+	_testClient = gosr.NewClientWithCodec(&_testTCPCodec)
 }
 
 func testStop(t *testing.T) {
