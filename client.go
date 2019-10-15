@@ -174,13 +174,6 @@ func (p *client) send(call *Call) {
 		call.done()
 		return
 	}
-	_, ok := p.pending[seq]
-	if ok {
-		p.mutex.Unlock()
-		call.Error = Errof("[chanrpc] repeated seq, seq=%v", seq)
-		call.done()
-		return
-	}
 	p.pending[seq] = call
 	p.mutex.Unlock()
 	// if p.timeout > 0 {

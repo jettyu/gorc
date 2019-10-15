@@ -13,8 +13,6 @@ func Errof(format string, args ...interface{}) Error {
 }
 
 var (
-	// ErrTimeOut ...
-	ErrTimeOut Error = fmt.Errorf("[gosr] timeout")
 	// ErrClosed ...
 	ErrClosed Error = fmt.Errorf("[gosr] closed")
 )
