@@ -14,8 +14,8 @@ type Call struct {
 	Reply         interface{} // The reply from the function (*struct).
 	Error         error       // After completion, the error status.
 	Done          chan *Call  // Strobes when call is complete.
-	Context       interface{}
 	seq           interface{}
+	cb            func(*Call)
 }
 
 // Request ...
@@ -55,6 +55,7 @@ type Client interface {
 	Close() error
 	Go(serviceMethod, args interface{}, reply interface{}, done chan *Call) *Call
 	Call(serviceMethod, args interface{}, reply interface{}) error
+	CallAsync(serviceMethod, args, reply interface{}, cb func(*Call))
 	Wait()
 }
 
@@ -129,9 +130,20 @@ func (p *client) Go(serviceMethod, args interface{}, reply interface{}, done cha
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
-func (p *client) Call(serviceMethod, args interface{}, reply interface{}) error {
+func (p *client) Call(serviceMethod, args, reply interface{}) error {
 	call := <-p.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
+}
+
+func (p *client) CallAsync(serviceMethod, args, reply interface{}, cb func(*Call)) {
+	call := new(Call)
+	call.ServiceMethod = serviceMethod
+	call.Args = args
+	call.Reply = reply
+	call.Done = make(chan *Call, 1)
+	call.cb = cb
+	p.send(call)
+	return
 }
 
 // // CallWithTimeout invokes the named function, waits for it to complete, and returns its error status.
@@ -281,6 +293,9 @@ func (call *Call) done() {
 	select {
 	case call.Done <- call:
 		// ok
+		if call.cb != nil {
+			call.cb(call)
+		}
 	default:
 		// We don't want to block here. It is the caller's responsibility to make
 		// sure the channel has enough buffer space. See comment in Go().

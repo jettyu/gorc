@@ -200,5 +200,13 @@ func TestClient(t *testing.T) {
 			}
 		}(i)
 	}
+	wg.Add(1)
+	var rsp string
+	_testClient.CallAsync(nil, "CallAsync", &rsp, func(*gosr.Call) {
+		defer wg.Done()
+		if rsp != "CallAsync" {
+			t.Fatal(rsp)
+		}
+	})
 	wg.Wait()
 }
