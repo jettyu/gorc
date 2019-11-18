@@ -14,6 +14,7 @@ type Call struct {
 	Reply         interface{} // The reply from the function (*struct).
 	Error         error       // After completion, the error status.
 	Done          chan *Call  // Strobes when call is complete.
+	Context       interface{}
 	seq           interface{}
 }
 
