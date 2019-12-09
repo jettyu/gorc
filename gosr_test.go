@@ -132,7 +132,7 @@ func testServerClient(t *testing.T, client gosr.Client, count *int32) {
 				return
 			}
 			if arg != res {
-				t.Fatal(arg, res)
+				t.Error(arg, res)
 			}
 		}(i)
 	}
@@ -216,6 +216,7 @@ func TestDual(t *testing.T) {
 		return nil
 	})
 	handlers.Register("count", func(i int32, resp *gosr.ResponseWriter, ctx interface{}) error {
+		defer resp.Free()
 		resp.Reply(atomic.LoadInt32(ctx.(*int32)))
 		return nil
 	})

@@ -148,7 +148,6 @@ func (p *client) CallAsync(serviceMethod, args, reply interface{}, cb func(*Call
 	call.Done = make(chan *Call, 1)
 	call.cb = cb
 	p.send(call)
-	return
 }
 
 func (p *client) CallWithNoReply(serviceMethod, args interface{}) error {

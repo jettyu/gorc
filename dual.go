@@ -46,11 +46,13 @@ func NewDualWithCodec(codec DualCodec, handlers *HandlerManager, ctx interface{}
 	return newDualWithCodec(codec, handlers, ctx)
 }
 
-type codecAdapter struct {
+// CodecAdapter ...
+type CodecAdapter struct {
 	DualCodec
 }
 
-func (p codecAdapter) ReadResponseHeader(rsp *Response) error {
+// ReadResponseHeader ...
+func (p CodecAdapter) ReadResponseHeader(rsp *Response) error {
 	var header DualHeader
 	err := p.ReadHeader(&header)
 	if err != nil {
@@ -60,7 +62,8 @@ func (p codecAdapter) ReadResponseHeader(rsp *Response) error {
 	return nil
 }
 
-func (p codecAdapter) ReadRequestHeader(req *Request) error {
+// ReadRequestHeader ...
+func (p CodecAdapter) ReadRequestHeader(req *Request) error {
 	var header DualHeader
 	err := p.ReadHeader(&header)
 	if err != nil {
@@ -72,7 +75,7 @@ func (p codecAdapter) ReadRequestHeader(req *Request) error {
 
 type dual struct {
 	codec        DualCodec
-	codecAdapter *codecAdapter
+	codecAdapter *CodecAdapter
 	client       *client
 	server       *server
 	head         *DualHeader
@@ -95,7 +98,7 @@ func (p *dual) getResponse() *Response {
 func newDualWithCodec(codec DualCodec, handlers *HandlerManager, ctx interface{}) *dual {
 	s := &dual{
 		codec:        codec,
-		codecAdapter: &codecAdapter{codec},
+		codecAdapter: &CodecAdapter{codec},
 		head:         new(DualHeader),
 		request:      new(Request),
 		response:     new(Response),
@@ -109,7 +112,6 @@ func newDualWithCodec(codec DualCodec, handlers *HandlerManager, ctx interface{}
 
 func (p *dual) SetContext(ctx interface{}) {
 	p.server.SetContext(ctx)
-	return
 }
 
 func (p *dual) Client() Client {
@@ -132,8 +134,7 @@ func (p *dual) ServeRequest() (err error) {
 			continue
 		}
 		head.ToRequest(request)
-		*response = Response{}
-		err = p.server.dealRequestBody(request, response, p.codecAdapter, p.server.ctx, true)
+		err = p.server.dealRequestBody(request, true)
 		return
 	}
 	p.client.dealClose(err)
@@ -143,7 +144,7 @@ func (p *dual) ServeRequest() (err error) {
 func (p *dual) ReadFunction(sf *ServerFunction) (err error) {
 	head := p.getHeader()
 	request := p.getRequest()
-	response := new(Response)
+	response := p.getResponse()
 	for err == nil {
 		*head = DualHeader{}
 		err = p.codec.ReadHeader(head)
@@ -156,8 +157,7 @@ func (p *dual) ReadFunction(sf *ServerFunction) (err error) {
 			continue
 		}
 		head.ToRequest(request)
-		*response = Response{}
-		err = p.server.dealFunction(request, response, p.codecAdapter, sf, p.server.ctx)
+		err = p.server.dealFunction(request, sf)
 		return
 	}
 	p.client.dealClose(err)
@@ -184,7 +184,7 @@ func (p *dual) Serve() {
 		}
 		head.ToRequest(request)
 		// *response = Response{}
-		err = p.server.dealRequestBody(request, new(Response), p.codecAdapter, p.server.ctx, false)
+		err = p.server.dealRequestBody(request, false)
 	}
 	p.client.dealClose(err)
 }
