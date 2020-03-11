@@ -59,12 +59,13 @@ func (p *HandlerManager) Register(serviceMethod interface{}, rcvr interface{}) e
 	if e != nil {
 		return e
 	}
-	_, ok := p.handlers[serviceMethod]
-	if ok {
-		return os.ErrExist
-	}
 	p.handlers[serviceMethod] = s
 	return nil
+}
+
+func (p *HandlerManager) Has(serviceMethod interface{}) bool {
+	_, ok := p.handlers[serviceMethod]
+	return ok
 }
 
 // ServerCodec ...
