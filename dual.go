@@ -1,5 +1,7 @@
 package gosr
 
+import "fmt"
+
 // DualHeader ...
 type DualHeader struct {
 	Seq           interface{}
@@ -7,6 +9,11 @@ type DualHeader struct {
 	Error         error
 	Context       interface{}
 	IsRequest     bool
+}
+
+func (p *DualHeader) String() string {
+	return fmt.Sprintf(`{"seq":"%v", "service_method":"%v", "context":"%v", "error":"%v", "is_request":"%v"}`,
+		p.Seq, p.ServiceMethod, p.Context, p.Error, p.IsRequest)
 }
 
 // ToResponse ...
