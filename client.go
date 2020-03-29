@@ -2,6 +2,7 @@ package gosr
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -18,11 +19,21 @@ type Call struct {
 	cb            func(*Call)
 }
 
+func (p *Call) String() string {
+	return fmt.Sprintf(`{"seq":"%v", "service_method":"%v", "error":"%v"}`,
+		p.seq, p.ServiceMethod, p.Error)
+}
+
 // Request ...
 type Request struct {
 	Seq           interface{}
 	ServiceMethod interface{}
 	Context       interface{}
+}
+
+func (p *Request) String() string {
+	return fmt.Sprintf(`{"seq":"%v", "service_method":"%v", "context":"%v"}`,
+		p.Seq, p.ServiceMethod, p.Context)
 }
 
 // Response ...
@@ -31,6 +42,11 @@ type Response struct {
 	ServiceMethod interface{}
 	Error         error
 	Context       interface{}
+}
+
+func (p *Response) String() string {
+	return fmt.Sprintf(`{"seq":"%v", "service_method":"%v", "context":"%v", "error":"%v"}`,
+		p.Seq, p.ServiceMethod, p.Context, p.Error)
 }
 
 // A ClientCodec implements writing of RPC requests and
